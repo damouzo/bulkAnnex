@@ -1,0 +1,48 @@
+name: bulkannex_r
+channels:
+  - defaults
+  - conda-forge
+  - bioconda
+dependencies:
+  # R base
+  - r-base=4.3
+  # Bioconductor core — analysis
+  - bioconductor-genomeinfodbdata    # required by GenomeInfoDb (DESeq2 dependency)
+  - bioconductor-deseq2>=1.40
+  - bioconductor-clusterprofiler>=4.8
+  - bioconductor-fgsea>=1.26
+  - bioconductor-org.hs.eg.db>=3.17
+  - bioconductor-org.mm.eg.db>=3.17
+  - bioconductor-annotationdbi>=1.62
+  - r-msigdbr              # CRAN package (not Bioconductor)
+  - bioconductor-reactomepa>=1.44
+  - bioconductor-biocparallel>=1.34
+  - bioconductor-edger>=3.42
+  - r-ashr                 # LFC shrinkage for DESeq2 lfcShrink(type='ashr')
+  # Plotting
+  - r-ggplot2>=3.4
+  - r-ggrepel>=0.9
+  - r-pheatmap>=1.0.12
+  - r-rcolorbrewer>=1.1
+  - r-viridis>=0.6
+  - r-patchwork>=1.1
+  - r-scales>=1.2
+  - r-forcats>=1.0
+  # Data manipulation
+  - r-dplyr>=1.1
+  - r-tidyr>=1.3
+  - r-readr>=2.1
+  - r-tibble>=3.2
+  - r-stringr>=1.5
+  - r-jsonlite>=1.8
+  - r-rlang>=1.1
+  # CLI
+  - r-optparse>=1.7
+  # Shiny dashboard
+  - r-shiny>=1.7
+  - r-bslib>=0.5
+  - r-dt>=0.28
+  - r-plotly>=4.10
+  - r-htmlwidgets>=1.6
+  - r-shinywidgets>=0.7
+  - r-shinycssloaders>=1.0

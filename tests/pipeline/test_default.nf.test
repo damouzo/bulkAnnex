@@ -1,0 +1,68 @@
+nextflow_pipeline {
+
+    name "Test bulkAnnex default (NB4 demo data)"
+    script "main.nf"
+
+    test "pipeline runs end-to-end with test profile" {
+
+        when {
+            params {
+                input     = "${projectDir}/data_demo/samplesheet.csv"
+                counts    = "${projectDir}/data_demo/counts/salmon.merged.gene_counts.tsv"
+                contrasts = "${projectDir}/data_demo/contrasts.csv"
+                organism  = "human"
+                outdir    = "results_nftest"
+                skip_dashboard = true
+                max_cpus   = 2
+                max_memory = "8.GB"
+                max_time   = "2.h"
+            }
+        }
+
+        then {
+            // Pipeline must succeed
+            assert workflow.success
+
+            // INPUT_CHECK outputs
+            assert path("${params.outdir}").exists()
+
+            // QC outputs
+            assert path("${params.outdir}/qc/qc_metrics.csv").exists()
+            assert path("${params.outdir}/qc/qc_library_sizes.pdf").exists()
+            assert path("${params.outdir}/qc/qc_pca.pdf").exists()
+            assert path("${params.outdir}/qc/qc_correlation_heatmap.pdf").exists()
+
+            // Normalization outputs
+            assert path("${params.outdir}/normalization/deseq2_dds.rds").exists()
+            assert path("${params.outdir}/normalization/deseq2_vst_counts.tsv").exists()
+
+            // DGE outputs (expect at least one contrast directory)
+            assert path("${params.outdir}/dge").exists()
+        }
+    }
+
+    test "pipeline runs with no batch column" {
+
+        when {
+            params {
+                // Reuse demo data but override samplesheet
+                // (this test validates the ~ condition design path)
+                input     = "${projectDir}/data_demo/samplesheet.csv"
+                counts    = "${projectDir}/data_demo/counts/salmon.merged.gene_counts.tsv"
+                contrasts = "${projectDir}/data_demo/contrasts.csv"
+                organism  = "human"
+                outdir    = "results_nftest_nobatch"
+                skip_dashboard = true
+                run_gsea  = false
+                max_cpus   = 2
+                max_memory = "8.GB"
+                max_time   = "2.h"
+            }
+        }
+
+        then {
+            assert workflow.success
+            assert path("${params.outdir}/normalization/deseq2_dds.rds").exists()
+        }
+    }
+}

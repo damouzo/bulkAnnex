@@ -1,0 +1,55 @@
+/* bulkAnnex dashboard — custom styles */
+
+/* Navbar */
+.navbar-brand img {
+    vertical-align: middle;
+}
+
+/* Cards */
+.card {
+    border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    margin-bottom: 16px;
+}
+
+.card-header {
+    font-weight: 600;
+    font-size: 0.95rem;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+/* Value boxes */
+.bslib-value-box .value-box-value {
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+/* Tables */
+table.dataTable td, table.dataTable th {
+    font-size: 0.85rem;
+}
+
+/* Plotly charts */
+.plotly {
+    border-radius: 4px;
+}
+
+/* Search button */
+.btn-primary {
+    width: 100%;
+    margin-top: 4px;
+}
+
+/* Footer */
+.navbar-nav .text-muted {
+    padding: 0.5rem 1rem;
+    line-height: 2.5;
+}
+
+/* Responsive tweaks */
+@media (max-width: 768px) {
+    .bslib-value-box .value-box-value {
+        font-size: 1.4rem;
+    }
+}

@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+jobs:
+  # ---- Nextflow syntax check (no execution) ----------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: "latest-stable"
+
+      - name: Preview pipeline (DSL2 syntax check)
+        run: nextflow run main.nf -profile test,docker -preview
+
+  # ---- Full pipeline test with Docker ----------------------------------------
+  test:
+    name: Pipeline test (Docker)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: "latest-stable"
+
+      - name: Run test profile
+        run: |
+          nextflow run main.nf \
+            -profile test,docker \
+            --outdir ./results_ci \
+            --skip_dashboard true
+
+      - name: Check key outputs exist
+        run: |
+          test -f results_ci/qc/qc_metrics.csv          || { echo "MISSING: qc_metrics.csv";        exit 1; }
+          test -f results_ci/normalization/deseq2_dds.rds   || { echo "MISSING: deseq2_dds.rds";        exit 1; }
+          test -f results_ci/normalization/deseq2_vst_counts.tsv || { echo "MISSING: vst_counts.tsv"; exit 1; }
+          echo "All expected outputs present."
+
+      - name: Upload results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-results
+          path: results_ci/
+          retention-days: 7
