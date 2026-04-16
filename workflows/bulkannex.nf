@@ -100,7 +100,7 @@ workflow BULKANNEX {
     // We only need a sync signal (collected versions) so the process runs after
     // all upstream processes have published their outputs.
     if (!params.skip_dashboard) {
-        ch_sync = ch_versions.collect()
+        ch_sync = ch_versions.collect().map { files -> files.size() }
         SHINY_DASHBOARD(ch_sync)
         ch_versions = ch_versions.mix(SHINY_DASHBOARD.out.versions)
     }

@@ -62,8 +62,11 @@ res_df <- res_df[order(res_df$padj, na.last = TRUE), ]
 
 # ---- save full results ------------------------------------------------------
 out_csv <- paste0(contrast_id, "_DESeq2_results.csv")
-write.csv(res_df[, c("gene_id", "gene_name", "baseMean", "log2FoldChange",
-                     "lfcSE", "stat", "pvalue", "padj")],
+# lfcShrink(type="ashr") may drop the 'stat' column; select only what is present
+cols_wanted  <- c("gene_id", "gene_name", "baseMean", "log2FoldChange",
+                  "lfcSE", "stat", "pvalue", "padj")
+cols_present <- intersect(cols_wanted, colnames(res_df))
+write.csv(res_df[, cols_present],
           file = out_csv, row.names = FALSE, quote = FALSE)
 message("Results saved: ", out_csv)
 

@@ -93,5 +93,31 @@ workflow {
 }
 
 workflow.onComplete {
-    log.info (workflow.success ? "\nPipeline completed successfully!\nResults: ${params.outdir}\n" : "\nPipeline failed.\n")
+    if (workflow.success) {
+        // Resolve SIF path so the HPC command is copy-paste ready (no manual editing).
+        def sif_abs  = new File("${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.0.sif").canonicalPath
+        def sif_line = new File(sif_abs).exists()
+            ? "BULKANNEX_SIF=${sif_abs} \\\n     bash"
+            : "bash"
+        log.info """
+──────────────────────────────────────────────────────────────────────
+ Pipeline completed successfully!
+
+ Results : ${params.outdir}
+
+ Launch the interactive dashboard
+ ─────────────────────────────────────────────────────────────────────
+ Local (R must be available):
+   bash ${params.outdir}/dashboard/launch_dashboard.sh
+
+ HPC (Apocrita / SLURM) — copy-paste this command:
+   ${sif_line} ${params.outdir}/dashboard/launch_dashboard_hpc.sh ${params.outdir}
+
+   Once the SLURM job starts, the exact ssh tunnel command will be
+   printed. Run it in a new terminal on your local machine.
+──────────────────────────────────────────────────────────────────────
+""".stripIndent()
+    } else {
+        log.info "\nPipeline failed. Check the error above and rerun with -resume.\n"
+    }
 }

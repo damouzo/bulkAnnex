@@ -88,11 +88,16 @@ mod_gsea_server <- function(id, app_data) {
             if (is.null(db_data)) return(data.frame())
             df <- db_data[[input$contrast]]
             if (is.null(df) || nrow(df) == 0) return(data.frame())
-            # Normalise column names for consistency
-            if (!"padj" %in% colnames(df) && "pval" %in% colnames(df))
-                df$padj <- p.adjust(df$pval, method = "BH")
-            if (!"Description" %in% colnames(df) && "pathway" %in% colnames(df))
-                df$Description <- df$pathway
+            # Normalise column names for consistency across GO (clusterProfiler)
+            # and Hallmarks/KEGG/Reactome (fgsea / other) outputs.
+            # p-value columns
+            if (!"padj"  %in% colnames(df) && "p.adjust" %in% colnames(df)) df$padj  <- df$p.adjust
+            if (!"padj"  %in% colnames(df) && "pval"     %in% colnames(df)) df$padj  <- p.adjust(df$pval, method = "BH")
+            if (!"pval"  %in% colnames(df) && "pvalue"   %in% colnames(df)) df$pval  <- df$pvalue
+            # Description column
+            if (!"Description" %in% colnames(df) && "pathway" %in% colnames(df)) df$Description <- df$pathway
+            # Leading-edge column (GO uses leading_edge, fgsea uses leadingEdge)
+            if (!"leadingEdge" %in% colnames(df) && "leading_edge" %in% colnames(df)) df$leadingEdge <- df$leading_edge
             df
         })
 
@@ -207,6 +212,11 @@ mod_gsea_server <- function(id, app_data) {
         output$results_table <- renderDT({
             df <- current_gsea_df()
             if (nrow(df) == 0) return(datatable(data.frame()))
+            # For GO, filter by selected ontology
+            if (input$database == "go" && "ontology" %in% colnames(df)) {
+                ont <- input$go_ont %||% "BP"
+                df <- df[df$ontology == ont, , drop = FALSE]
+            }
             cols_to_show <- intersect(
                 c("Description", "ontology", "NES", "pval", "padj",
                   "size", "setSize", "core_enrichment", "leadingEdge"),

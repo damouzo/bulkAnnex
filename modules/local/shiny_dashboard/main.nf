@@ -9,7 +9,7 @@ process SHINY_DASHBOARD {
     }
 
     input:
-    path versions  // sync signal: all upstream processes have completed
+    val sync  // sync signal: number of upstream versions.yml collected (no file staging)
 
     output:
     path 'dashboard/',   emit: dashboard_dir
@@ -31,12 +31,6 @@ process SHINY_DASHBOARD {
     cp    ${projectDir}/dashboard/launch_dashboard.sh     dashboard/ 2>/dev/null || true
     cp    ${projectDir}/dashboard/launch_dashboard_hpc.sh dashboard/ 2>/dev/null || true
 
-    Rscript -e "
-        ver <- sessionInfo()
-        writeLines(c('SHINY_DASHBOARD:',
-                     paste0('    R: ', ver\$R.version\$version.string),
-                     paste0('    shiny: ', as.character(packageVersion('shiny')))),
-                   'versions.yml')
-    "
+    Rscript -e "writeLines(c('SHINY_DASHBOARD:', paste0('    R: ', R.version[['version.string']]), paste0('    shiny: ', as.character(packageVersion('shiny')))), 'versions.yml')"
     """
 }

@@ -100,6 +100,10 @@ save_plot <- function(base, p, width = 10, height = 7) {
 
 # ---- helper: dot plot for enrichment results --------------------------------
 make_dotplot <- function(df, title, top_n = 20) {
+    # clusterProfiler uses 'p.adjust'; fgsea uses 'padj' — normalise
+    if (!"padj" %in% colnames(df) && "p.adjust" %in% colnames(df)) {
+        df$padj <- df$p.adjust
+    }
     df <- df %>%
         filter(padj < opt$pval_cutoff) %>%
         arrange(padj) %>%
@@ -138,12 +142,12 @@ for (ont in c("BP", "MF", "CC")) {
         error = function(e) { message("    GO ", ont, " failed: ", e$message); NULL }
     )
     if (!is.null(res_go)) {
-        gsea_objects[[paste0("go_", tolower(ont))]] <<- res_go  # save gseaResult object
+        gsea_objects[[paste0("go_", tolower(ont))]] <- res_go  # save gseaResult object (for loop: no new env, use <-)
         df <- as.data.frame(res_go)
         df$ontology <- ont
         go_results[[ont]] <- df
         out_f <- paste0(contrast_id, "_GO_", ont, "_gsea.csv")
-        write.csv(df, file = out_f, row.names = FALSE, quote = FALSE)
+        write.csv(df, file = out_f, row.names = FALSE)
 
         df_plot <- df %>%
             mutate(size = sapply(strsplit(core_enrichment, "/"), length))
@@ -156,7 +160,7 @@ for (ont in c("BP", "MF", "CC")) {
 if (length(go_results) > 0) {
     go_all <- bind_rows(go_results)
     write.csv(go_all, file = paste0(contrast_id, "_GO_all_gsea.csv"),
-              row.names = FALSE, quote = FALSE)
+              row.names = FALSE)
 }
 
 # ---- KEGG -------------------------------------------------------------------
@@ -174,7 +178,7 @@ tryCatch({
     gsea_objects$kegg <<- res_kegg  # save gseaResult object
     df_kegg <- as.data.frame(res_kegg)
     write.csv(df_kegg, file = paste0(contrast_id, "_KEGG_gsea.csv"),
-              row.names = FALSE, quote = FALSE)
+              row.names = FALSE)
     df_kegg$size <- sapply(strsplit(df_kegg$core_enrichment, "/"), length)
     p <- make_dotplot(df_kegg, paste0("KEGG — ", contrast_id))
     if (!is.null(p)) save_plot(paste0(contrast_id, "_KEGG_dotplot"), p)
@@ -194,19 +198,19 @@ tryCatch({
     h_list   <- split(h_sets$entrez_gene, h_sets$gs_name)
     h_list   <- lapply(h_list, function(x) as.character(unique(x)))
 
-    res_hall <- fgsea(pathways  = h_list,
-                      stats     = ranked_entrez,
-                      minSize   = opt$min_gs,
-                      maxSize   = opt$max_gs,
+    set.seed(42)  # fgsea v1.32+ has no seed= param; use set.seed() instead
+    res_hall <- fgsea(pathways    = h_list,
+                      stats       = ranked_entrez,
+                      minSize     = opt$min_gs,
+                      maxSize     = opt$max_gs,
                       nPermSimple = opt$n_perm,
-                      eps       = 0,
-                      seed      = 42)
+                      eps         = 0)
     res_hall$padj <- p.adjust(res_hall$pval, method = "BH")
     gsea_objects$hallmarks <<- data.table::copy(res_hall)  # save before collapsing leadingEdge
     res_hall$leadingEdge <- sapply(res_hall$leadingEdge, paste, collapse = "/")
 
     write.csv(res_hall, file = paste0(contrast_id, "_Hallmarks_gsea.csv"),
-              row.names = FALSE, quote = FALSE)
+              row.names = FALSE)
 
     hall_plot <- res_hall %>%
         rename(Description = pathway, NES = NES, size = size) %>%
@@ -233,7 +237,7 @@ tryCatch({
     gsea_objects$reactome <<- res_react  # save gseaResult object
     df_react <- as.data.frame(res_react)
     write.csv(df_react, file = paste0(contrast_id, "_Reactome_gsea.csv"),
-              row.names = FALSE, quote = FALSE)
+              row.names = FALSE)
     df_react$size <- sapply(strsplit(df_react$core_enrichment, "/"), length)
     p <- make_dotplot(df_react, paste0("Reactome — ", contrast_id))
     if (!is.null(p)) save_plot(paste0(contrast_id, "_Reactome_dotplot"), p)

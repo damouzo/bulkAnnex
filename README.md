@@ -100,30 +100,10 @@ Then open `http://localhost:3838` in your browser.
 
 ---
 
-## Demo data
-
-`data_demo/` contains 15 NB4 cell-line samples (5 conditions × 3 experiments), 4 contrasts vs Scramble.
-
-```bash
-nextflow run main.nf -profile test,singularity
-```
-
----
-
 ## Output
 
 See [docs/output.md](docs/output.md) for a full description of output files.
 
----
-
-## Citation
-
-If you use bulkAnnex in your work, please cite the tools it depends on:
-
-- DESeq2: Love et al. (2014) *Genome Biology*
-- clusterProfiler: Wu et al. (2021) *The Innovation*
-- fgsea: Korotkevich et al. (2021) *bioRxiv*
-- Nextflow: Di Tommaso et al. (2017) *Nature Biotechnology*
 
 ---
 

@@ -10,8 +10,12 @@ suppressPackageStartupMessages({
     library(plotly)
     library(DT)
     library(enrichplot)
-    library(ggridges)
+    # ggridges is used internally by enrichplot::ridgeplot(); not loaded here
+    # so a missing package does not crash the app — ridgeplot tab shows an error message instead.
 })
+
+# Null-coalescing operator (rlang-style) — used in modules without requiring rlang on the search path.
+`%||%` <- function(x, y) if (is.null(x)) y else x
 
 # ---- Results directory -------------------------------------------------------
 # Priority: BULKANNEX_RESULTS_DIR env var → parent directory of the app → "."
@@ -73,8 +77,15 @@ load_gsea_csv <- function(results_dir) {
                             full.names = TRUE, recursive = TRUE)
         if (length(files) > 0) {
             db_list <- lapply(files, function(f) {
-                df <- read.csv(f, stringsAsFactors = FALSE, check.names = FALSE)
-                if (nrow(df) == 0) NULL else df
+                df <- tryCatch(
+                    read.csv(f, stringsAsFactors = FALSE, check.names = FALSE),
+                    error = function(e) {
+                        message("Warning: could not parse ", basename(f),
+                                " (", e$message, ") — skipping.")
+                        NULL
+                    }
+                )
+                if (is.null(df) || nrow(df) == 0) NULL else df
             })
             names(db_list) <- sub(patterns[[db]], "", basename(files))
             result[[db]] <- Filter(Negate(is.null), db_list)
