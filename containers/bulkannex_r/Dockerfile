@@ -73,12 +73,15 @@ RUN Rscript -e " \
     ) \
 "
 
-# ---- Sanity check ------------------------------------------------------------
+# ---- Sanity check -----------------------------------------------------------
 RUN Rscript -e " \
-    pkgs <- c('DESeq2', 'GenomeInfoDbData', 'clusterProfiler', 'ReactomePA', 'fgsea', \
-              'pathview', 'org.Hs.eg.db', 'org.Mm.eg.db', 'ashr', \
+    required <- c('DESeq2', 'GenomeInfoDbData', 'clusterProfiler', 'ReactomePA', 'fgsea', \
+              'org.Hs.eg.db', 'org.Mm.eg.db', 'ashr', \
               'ggridges', 'shiny'); \
-    missing <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]; \
-    if (length(missing) > 0) stop('Missing packages: ', paste(missing, collapse=', ')); \
+    optional <- c('pathview'); \
+    missing  <- required[!sapply(required, requireNamespace, quietly = TRUE)]; \
+    if (length(missing) > 0) stop('Missing required packages: ', paste(missing, collapse=', ')); \
+    miss_opt <- optional[!sapply(optional, requireNamespace, quietly = TRUE)]; \
+    if (length(miss_opt) > 0) message('WARNING: optional packages not found: ', paste(miss_opt, collapse=', ')); \
     message('All required packages present.') \
 "
