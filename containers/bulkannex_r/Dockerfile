@@ -2,7 +2,7 @@ FROM rocker/bioconductor:3.20
 
 LABEL org.opencontainers.image.title="bulkannex_r"
 LABEL org.opencontainers.image.description="R/Bioconductor environment for bulkAnnex bulk RNA-seq downstream analysis pipeline"
-LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.version="1.0.1"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # ---- System dependencies -----------------------------------------------------
