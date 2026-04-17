@@ -94,6 +94,33 @@ workflow {
 
 workflow.onComplete {
     if (workflow.success) {
+        // ---- Always refresh dashboard scripts from projectDir ----------------
+        // The SHINY_DASHBOARD process is cached with -resume; re-publishing from
+        // the old work dir would overwrite any script updates. Copying here in
+        // onComplete (which always runs) ensures the latest scripts reach outdir.
+        def dashSrc = new File("${projectDir}/dashboard")
+        def dashDst = new File("${params.outdir}/dashboard")
+        dashDst.mkdirs()
+        new File(dashDst, 'modules').mkdirs()
+        new File(dashDst, 'www').mkdirs()
+
+        // Top-level dashboard files
+        ['app.R', 'global.R', 'ui.R', 'server.R',
+         'launch_dashboard.sh', 'launch_dashboard_hpc.sh'].each { fname ->
+            def src = new File(dashSrc, fname)
+            def dst = new File(dashDst, fname)
+            if (src.exists()) { dst.bytes = src.bytes }
+        }
+        // modules/ and www/ subdirectories
+        ['modules', 'www'].each { subdir ->
+            def srcSubDir = new File(dashSrc, subdir)
+            if (srcSubDir.exists()) {
+                srcSubDir.eachFile { f ->
+                    new File(dashDst, "${subdir}/${f.name}").bytes = f.bytes
+                }
+            }
+        }
+
         // Resolve SIF path so the HPC command is copy-paste ready (no manual editing).
         def sif_abs  = new File("${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.0.sif").canonicalPath
         def sif_line = new File(sif_abs).exists()
