@@ -128,6 +128,7 @@ message("Running GO GSEA (BP, MF, CC)...")
 go_results <- list()
 for (ont in c("BP", "MF", "CC")) {
     message("  GO: ", ont)
+    set.seed(42)
     res_go <- tryCatch(
         gseGO(geneList     = ranked_ensembl,
               OrgDb        = org_db,
@@ -138,7 +139,7 @@ for (ont in c("BP", "MF", "CC")) {
               pvalueCutoff = 1,
               verbose      = FALSE,
               eps          = 0,
-              seed         = 42),
+              seed         = TRUE),
         error = function(e) { message("    GO ", ont, " failed: ", e$message); NULL }
     )
     if (!is.null(res_go)) {
@@ -166,6 +167,7 @@ if (length(go_results) > 0) {
 # ---- KEGG -------------------------------------------------------------------
 message("Running KEGG GSEA (requires internet)...")
 tryCatch({
+    set.seed(42)
     res_kegg <- gseKEGG(geneList     = ranked_entrez,
                         organism     = kegg_org,
                         minGSSize    = opt$min_gs,
@@ -173,7 +175,7 @@ tryCatch({
                         pvalueCutoff = 1,
                         verbose      = FALSE,
                         eps          = 0,
-                        seed         = 42,
+                        seed         = TRUE,
                         use_internal_data = FALSE)
     gsea_objects$kegg <<- res_kegg  # save gseaResult object
     df_kegg <- as.data.frame(res_kegg)
@@ -206,10 +208,12 @@ tryCatch({
                       nPermSimple = opt$n_perm,
                       eps         = 0)
     res_hall$padj <- p.adjust(res_hall$pval, method = "BH")
-    gsea_objects$hallmarks <<- data.table::copy(res_hall)  # save before collapsing leadingEdge
-    res_hall$leadingEdge <- sapply(res_hall$leadingEdge, paste, collapse = "/")
+    gsea_objects$hallmarks <<- data.table::copy(res_hall)  # save native data.table (leadingEdge as list)
+    # convert to data.frame to avoid data.table list-column issues in write.csv
+    res_hall_df <- as.data.frame(res_hall)
+    res_hall_df$leadingEdge <- sapply(res_hall_df$leadingEdge, paste, collapse = "/")
 
-    write.csv(res_hall, file = paste0(contrast_id, "_Hallmarks_gsea.csv"),
+    write.csv(res_hall_df, file = paste0(contrast_id, "_Hallmarks_gsea.csv"),
               row.names = FALSE)
 
     hall_plot <- res_hall %>%
@@ -226,6 +230,7 @@ tryCatch({
 # ---- Reactome ---------------------------------------------------------------
 message("Running Reactome GSEA (requires internet)...")
 tryCatch({
+    set.seed(42)
     res_react <- gsePathway(geneList     = ranked_entrez,
                             organism     = react_org,
                             minGSSize    = opt$min_gs,
@@ -233,7 +238,7 @@ tryCatch({
                             pvalueCutoff = 1,
                             verbose      = FALSE,
                             eps          = 0,
-                            seed         = 42)
+                            seed         = TRUE)
     gsea_objects$reactome <<- res_react  # save gseaResult object
     df_react <- as.data.frame(res_react)
     write.csv(df_react, file = paste0(contrast_id, "_Reactome_gsea.csv"),

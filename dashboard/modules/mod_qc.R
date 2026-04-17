@@ -115,8 +115,7 @@ mod_qc_server <- function(id, app_data) {
                     color = ~condition,
                     text = hover_text,
                     hoverinfo = "text",
-                    type = "scatter", mode = "markers+text",
-                    textposition = "top center",
+                    type = "scatter", mode = "markers",
                     marker = list(size = 10)) %>%
                 layout(
                     xaxis = list(title = paste0("PC1 (", pct[1], "%)")),

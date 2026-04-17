@@ -52,8 +52,14 @@ mod_gene_explorer_server <- function(id, app_data) {
 
         output$gene_selector_ui <- renderUI({
             ns <- session$ns
-            res <- search_results()
-            if (is.null(res) || nrow(res) == 0) return(p("No genes found."))
+            # Before first search, search_results() throws silently via req() — show prompt
+            res <- tryCatch(search_results(), error = function(e) NULL)
+            if (is.null(res)) {
+                return(p("Enter a gene name and click Search.", style = "color: grey; font-size: 0.9em;"))
+            }
+            if (nrow(res) == 0) {
+                return(p("No genes found.", style = "color: grey; font-size: 0.9em;"))
+            }
             choices <- setNames(res$gene_id,
                                 paste0(res$gene_name, " (", res$gene_id, ")"))
             selectInput(ns("selected_gene"), "Select gene", choices = choices)

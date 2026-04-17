@@ -136,8 +136,18 @@ mod_gsea_server <- function(id, app_data) {
             } else {
                 # Plotly-free ggplot fallback from CSV data
                 df <- current_gsea_df()
-                if (nrow(df) == 0)
-                    return(ggplot() + annotate("text", x=0.5, y=0.5, label="No results") + theme_void())
+                offline_dbs <- c("kegg", "reactome")
+                if (nrow(df) == 0) {
+                    msg <- if (input$database %in% offline_dbs) {
+                        paste0(toupper(input$database), " requires internet access from compute nodes.\n",
+                               "Results are unavailable when running on an isolated HPC cluster.")
+                    } else {
+                        "No results"
+                    }
+                    return(ggplot() + annotate("text", x = 0.5, y = 0.5, label = msg,
+                                               hjust = 0.5, vjust = 0.5, size = 4, colour = "grey40") +
+                               theme_void())
+                }
                 df_plot <- df %>%
                     filter(padj < input$padj_cut) %>%
                     arrange(padj) %>%

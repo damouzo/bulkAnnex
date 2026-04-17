@@ -10,29 +10,37 @@ mod_overview_ui <- function(id) {
             )
         ),
         fluidRow(
-            value_box(
-                title    = "Samples",
-                value    = textOutput(ns("n_samples")),
-                showcase = icon("vials"),
-                theme    = "primary"
+            column(3,
+                value_box(
+                    title    = "Samples",
+                    value    = textOutput(ns("n_samples")),
+                    showcase = icon("vials"),
+                    theme    = "primary"
+                )
             ),
-            value_box(
-                title    = "Conditions",
-                value    = textOutput(ns("n_conditions")),
-                showcase = icon("layer-group"),
-                theme    = "secondary"
+            column(3,
+                value_box(
+                    title    = "Conditions",
+                    value    = textOutput(ns("n_conditions")),
+                    showcase = icon("layer-group"),
+                    theme    = "secondary"
+                )
             ),
-            value_box(
-                title    = "Contrasts",
-                value    = textOutput(ns("n_contrasts")),
-                showcase = icon("not-equal"),
-                theme    = "info"
+            column(3,
+                value_box(
+                    title    = "Contrasts",
+                    value    = textOutput(ns("n_contrasts")),
+                    showcase = icon("not-equal"),
+                    theme    = "info"
+                )
             ),
-            value_box(
-                title    = "DEGs (any contrast)",
-                value    = textOutput(ns("n_degs")),
-                showcase = icon("dna"),
-                theme    = "success"
+            column(3,
+                value_box(
+                    title    = "DEGs (any contrast)",
+                    value    = textOutput(ns("n_degs")),
+                    showcase = icon("dna"),
+                    theme    = "success"
+                )
             )
         ),
         fluidRow(

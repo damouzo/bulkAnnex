@@ -11,11 +11,13 @@ mod_dge_ui <- function(id) {
                 card(
                     card_header("Settings"),
                     selectInput(ns("contrast"),  "Contrast", choices = NULL),
-                    sliderInput(ns("padj_cut"),  "FDR cutoff", min = 0.001, max = 0.2,
-                                value = 0.05, step = 0.001),
-                    sliderInput(ns("lfc_cut"),   "|log2FC| cutoff", min = 0, max = 5,
-                                value = 1, step = 0.1),
-                    numericInput(ns("n_label"),  "Label top N genes", value = 20, min = 0, max = 100)
+                    numericInput(ns("padj_cut"), "FDR cutoff",
+                                 value = 0.05, min = 0.001, max = 0.2, step = 0.001),
+                    numericInput(ns("lfc_cut"),  "|log2FC| cutoff",
+                                 value = 1, min = 0, max = 10, step = 0.1),
+                    numericInput(ns("n_label"),  "Label top N genes", value = 20, min = 0, max = 100),
+                    sliderInput(ns("label_size"), "Label font size",
+                                min = 6, max = 16, value = 9, step = 1)
                 )
             ),
             column(9,
@@ -84,7 +86,7 @@ mod_dge_server <- function(id, app_data) {
                     mode        = "markers",
                     marker      = list(size = 4, opacity = 0.7)) %>%
                 add_text(text = ~label, textposition = "top center",
-                         textfont = list(size = 9), showlegend = FALSE) %>%
+                         textfont = list(size = input$label_size), showlegend = FALSE) %>%
                 layout(
                     xaxis = list(title = "Shrunken log2 fold change"),
                     yaxis = list(title = "-log10(padj)"),
@@ -126,7 +128,7 @@ mod_dge_server <- function(id, app_data) {
                     mode      = "markers",
                     marker    = list(size = 4, opacity = 0.7)) %>%
                 add_text(text = ~label, textposition = "top center",
-                         textfont = list(size = 9), showlegend = FALSE) %>%
+                         textfont = list(size = input$label_size), showlegend = FALSE) %>%
                 layout(
                     xaxis = list(title = "log10(mean normalised count + 1)"),
                     yaxis = list(title = "Shrunken log2 fold change"),
