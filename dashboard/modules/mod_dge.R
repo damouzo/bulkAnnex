@@ -17,16 +17,16 @@ mod_dge_ui <- function(id) {
                                  value = 1, min = 0, max = 10, step = 0.1),
                     numericInput(ns("n_label"),  "Label top N genes", value = 20, min = 0, max = 100),
                     sliderInput(ns("label_size"), "Label font size",
-                                min = 6, max = 16, value = 9, step = 1)
+                                min = 6, max = 16, value = 9, step = 1),
+                    actionButton(ns("apply"), "Apply settings",
+                                 icon = icon("play"),
+                                 class = "btn-primary w-100 mt-2")
                 )
             ),
             column(9,
                 navset_card_tab(
                     nav_panel("Volcano",
                         plotlyOutput(ns("volcano_plot"), height = "500px")
-                    ),
-                    nav_panel("MA",
-                        plotlyOutput(ns("ma_plot"), height = "500px")
                     ),
                     nav_panel("Results Table",
                         DTOutput(ns("results_table"))
@@ -46,27 +46,41 @@ mod_dge_server <- function(id, app_data) {
                               choices = names(data()$dge))
         })
 
+        # Frozen params — only updates when Apply is clicked OR contrast changes.
+        # This prevents every keystroke in numericInputs from triggering recomputation.
+        params <- reactive({
+            list(
+                contrast   = input$contrast,
+                padj_cut   = input$padj_cut,
+                lfc_cut    = input$lfc_cut,
+                n_label    = input$n_label,
+                label_size = input$label_size
+            )
+        }) |> bindEvent(input$apply, input$contrast, ignoreNULL = TRUE, ignoreInit = FALSE)
+
         current_dge <- reactive({
-            req(input$contrast)
-            df <- data()$dge[[input$contrast]]
+            p <- params()
+            req(p$contrast)
+            df <- data()$dge[[p$contrast]]
             if (is.null(df)) return(data.frame())
             df %>%
                 filter(!is.na(padj)) %>%
                 mutate(
                     direction = case_when(
-                        padj < input$padj_cut & log2FoldChange >= input$lfc_cut  ~ "Up",
-                        padj < input$padj_cut & log2FoldChange <= -input$lfc_cut ~ "Down",
+                        padj < p$padj_cut & log2FoldChange >= p$lfc_cut  ~ "Up",
+                        padj < p$padj_cut & log2FoldChange <= -p$lfc_cut ~ "Down",
                         TRUE ~ "NS"
                     )
                 )
         })
 
         output$volcano_plot <- renderPlotly({
+            p  <- params()
             df <- current_dge()
             if (nrow(df) == 0) return(plot_ly() %>% layout(title = "No data"))
 
             # Top N labels
-            n_lab  <- min(input$n_label, nrow(df))
+            n_lab   <- min(p$n_label, nrow(df))
             top_ids <- df %>% filter(direction != "NS") %>%
                 arrange(padj) %>% head(n_lab) %>% pull(gene_id)
             df$label <- ifelse(df$gene_id %in% top_ids, df$gene_name, "")
@@ -86,53 +100,22 @@ mod_dge_server <- function(id, app_data) {
                     mode        = "markers",
                     marker      = list(size = 4, opacity = 0.7)) %>%
                 add_text(text = ~label, textposition = "top center",
-                         textfont = list(size = input$label_size), showlegend = FALSE) %>%
+                         textfont = list(size = p$label_size), showlegend = FALSE) %>%
                 layout(
                     xaxis = list(title = "Shrunken log2 fold change"),
                     yaxis = list(title = "-log10(padj)"),
-                    title = paste0("Volcano: ", input$contrast),
+                    title = paste0("Volcano: ", p$contrast),
                     shapes = list(
-                        list(type = "line", x0 = input$lfc_cut, x1 = input$lfc_cut,
+                        list(type = "line", x0 = p$lfc_cut, x1 = p$lfc_cut,
                              y0 = 0, y1 = 1, yref = "paper",
                              line = list(color = "grey", dash = "dash")),
-                        list(type = "line", x0 = -input$lfc_cut, x1 = -input$lfc_cut,
+                        list(type = "line", x0 = -p$lfc_cut, x1 = -p$lfc_cut,
                              y0 = 0, y1 = 1, yref = "paper",
                              line = list(color = "grey", dash = "dash")),
                         list(type = "line", x0 = 0, x1 = 1, xref = "paper",
-                             y0 = -log10(input$padj_cut), y1 = -log10(input$padj_cut),
+                             y0 = -log10(p$padj_cut), y1 = -log10(p$padj_cut),
                              line = list(color = "grey", dash = "dash"))
                     )
-                )
-        })
-
-        output$ma_plot <- renderPlotly({
-            df <- current_dge()
-            if (nrow(df) == 0) return(plot_ly() %>% layout(title = "No data"))
-
-            n_lab   <- min(input$n_label, nrow(df))
-            top_ids <- df %>% filter(direction != "NS") %>%
-                arrange(padj) %>% head(n_lab) %>% pull(gene_id)
-            df$label <- ifelse(df$gene_id %in% top_ids, df$gene_name, "")
-
-            plot_ly(df,
-                    x    = ~log10(baseMean + 1),
-                    y    = ~log2FoldChange,
-                    text = ~paste0("Gene: ", gene_name,
-                                   "<br>baseMean: ", round(baseMean, 1),
-                                   "<br>log2FC: ",   round(log2FoldChange, 3),
-                                   "<br>padj: ",     signif(padj, 3)),
-                    color     = ~direction,
-                    colors    = c("Up" = "#d73027", "Down" = "#4575b4", "NS" = "#bbbbbb"),
-                    hoverinfo = "text",
-                    type      = "scatter",
-                    mode      = "markers",
-                    marker    = list(size = 4, opacity = 0.7)) %>%
-                add_text(text = ~label, textposition = "top center",
-                         textfont = list(size = input$label_size), showlegend = FALSE) %>%
-                layout(
-                    xaxis = list(title = "log10(mean normalised count + 1)"),
-                    yaxis = list(title = "Shrunken log2 fold change"),
-                    title = paste0("MA: ", input$contrast)
                 )
         })
 

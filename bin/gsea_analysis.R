@@ -1,28 +1,27 @@
 #!/usr/bin/env Rscript
 # gsea_analysis.R — Gene set enrichment analysis for a single contrast
-# Runs GO (BP/MF/CC), KEGG, MSigDB Hallmarks, Reactome with clusterProfiler/fgsea.
+# Runs GO (BP/MF/CC), KEGG, Reactome with clusterProfiler/ReactomePA.
 
 suppressPackageStartupMessages({
     library(optparse)
     library(dplyr)
     library(ggplot2)
+    library(ggridges)
     library(clusterProfiler)
-    library(fgsea)
-    library(msigdbr)
+    library(enrichplot)
     library(ReactomePA)
     library(org.Hs.eg.db)
     library(org.Mm.eg.db)
     library(AnnotationDbi)
 })
 
-# Container for native result objects (gseaResult / data.table) — saved as RDS
+# Container for native result objects (gseaResult S4) — saved as RDS
 # for the dashboard to use enrichplot functions directly.
 gsea_objects <- list(
     go_bp    = NULL,
     go_mf    = NULL,
     go_cc    = NULL,
     kegg     = NULL,
-    hallmarks = NULL,
     reactome = NULL
 )
 
@@ -36,15 +35,13 @@ option_list <- list(
     make_option("--max_gs",      type = "integer",   default = 500,
                 help = "Max gene set size [default: 500]"),
     make_option("--pval_cutoff", type = "double",    default = 0.05,
-                help = "Adjusted p-value cutoff for plots [default: 0.05]"),
-    make_option("--n_perm",      type = "integer",   default = 1000,
-                help = "Number of fgsea permutations [default: 1000]")
+                help = "Adjusted p-value cutoff for plots [default: 0.05]")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
 # ---- setup ------------------------------------------------------------------
-org_db  <- if (opt$organism == "human") org.Hs.eg.db else org.Mm.eg.db
-kegg_org <- if (opt$organism == "human") "hsa" else "mmu"
+org_db    <- if (opt$organism == "human") org.Hs.eg.db else org.Mm.eg.db
+kegg_org  <- if (opt$organism == "human") "hsa" else "mmu"
 react_org <- if (opt$organism == "human") "human" else "mouse"
 contrast_id <- opt$contrast_id
 
@@ -100,7 +97,7 @@ save_plot <- function(base, p, width = 10, height = 7) {
 
 # ---- helper: dot plot for enrichment results --------------------------------
 make_dotplot <- function(df, title, top_n = 20) {
-    # clusterProfiler uses 'p.adjust'; fgsea uses 'padj' — normalise
+    # clusterProfiler uses 'p.adjust'; normalise to 'padj'
     if (!"padj" %in% colnames(df) && "p.adjust" %in% colnames(df)) {
         df$padj <- df$p.adjust
     }
@@ -123,6 +120,22 @@ make_dotplot <- function(df, title, top_n = 20) {
         theme(axis.text.y = element_text(size = 9))
 }
 
+# ---- helper: ridge plot for gseaResult S4 objects (GO / KEGG / Reactome) ----
+make_ridgeplot_s4 <- function(gse_obj, title, top_n = 20) {
+    df <- tryCatch(as.data.frame(gse_obj), error = function(e) data.frame())
+    if (nrow(df) == 0) return(NULL)
+    col_p <- if ("p.adjust" %in% colnames(df)) "p.adjust" else if ("padj" %in% colnames(df)) "padj" else NULL
+    n_sig <- if (!is.null(col_p)) sum(!is.na(df[[col_p]]) & df[[col_p]] < opt$pval_cutoff) else nrow(df)
+    if (n_sig == 0) return(NULL)
+    n_show <- min(top_n, n_sig)
+    tryCatch(
+        enrichplot::ridgeplot(gse_obj, showCategory = n_show) +
+            labs(title = title) +
+            theme_bw(base_size = 11),
+        error = function(e) { message("    ridgeplot error: ", e$message); NULL }
+    )
+}
+
 # ---- GO enrichment (BP, MF, CC) ---------------------------------------------
 message("Running GO GSEA (BP, MF, CC)...")
 go_results <- list()
@@ -143,17 +156,23 @@ for (ont in c("BP", "MF", "CC")) {
         error = function(e) { message("    GO ", ont, " failed: ", e$message); NULL }
     )
     if (!is.null(res_go)) {
-        gsea_objects[[paste0("go_", tolower(ont))]] <- res_go  # save gseaResult object (for loop: no new env, use <-)
+        gsea_objects[[paste0("go_", tolower(ont))]] <- res_go
         df <- as.data.frame(res_go)
         df$ontology <- ont
         go_results[[ont]] <- df
-        out_f <- paste0(contrast_id, "_GO_", ont, "_gsea.csv")
-        write.csv(df, file = out_f, row.names = FALSE)
+        write.csv(df, file = paste0(contrast_id, "_GO_", ont, "_gsea.csv"), row.names = FALSE)
 
         df_plot <- df %>%
             mutate(size = sapply(strsplit(core_enrichment, "/"), length))
         p <- make_dotplot(df_plot, paste0("GO ", ont, " — ", contrast_id))
         if (!is.null(p)) save_plot(paste0(contrast_id, "_GO_", ont, "_dotplot"), p)
+
+        p_ridge <- make_ridgeplot_s4(res_go, paste0("GO ", ont, " Ridgeplot — ", contrast_id))
+        if (!is.null(p_ridge)) {
+            n_sig <- sum(!is.na(df$p.adjust) & df$p.adjust < opt$pval_cutoff)
+            rh <- max(5, min(n_sig * 0.45 + 2, 16))
+            save_plot(paste0(contrast_id, "_GO_", ont, "_ridgeplot"), p_ridge, height = rh)
+        }
     }
 }
 
@@ -177,54 +196,59 @@ tryCatch({
                         eps          = 0,
                         seed         = TRUE,
                         use_internal_data = FALSE)
-    gsea_objects$kegg <<- res_kegg  # save gseaResult object
+    gsea_objects$kegg <- res_kegg
     df_kegg <- as.data.frame(res_kegg)
     write.csv(df_kegg, file = paste0(contrast_id, "_KEGG_gsea.csv"),
               row.names = FALSE)
     df_kegg$size <- sapply(strsplit(df_kegg$core_enrichment, "/"), length)
     p <- make_dotplot(df_kegg, paste0("KEGG — ", contrast_id))
     if (!is.null(p)) save_plot(paste0(contrast_id, "_KEGG_dotplot"), p)
+
+    p_ridge <- make_ridgeplot_s4(res_kegg, paste0("KEGG Ridgeplot — ", contrast_id))
+    if (!is.null(p_ridge)) {
+        n_sig <- sum(!is.na(df_kegg$p.adjust) & df_kegg$p.adjust < opt$pval_cutoff)
+        rh <- max(5, min(n_sig * 0.45 + 2, 16))
+        save_plot(paste0(contrast_id, "_KEGG_ridgeplot"), p_ridge, height = rh)
+    }
+
+    # ---- Pathview: top 10 significant KEGG pathways -------------------------
+    message("  Generating Pathview for top KEGG pathways...")
+    tryCatch({
+        fc_entrez   <- setNames(dge_mapped$log2FoldChange, as.character(dge_mapped$entrez_id))
+        df_kegg_sig <- df_kegg[order(df_kegg$p.adjust), ]
+        top10_ids   <- head(df_kegg_sig$ID, 10)
+        for (pw_full in top10_ids) {
+            pw_num <- sub("^[a-z]+", "", pw_full)  # "hsa04110" → "04110"
+            tryCatch({
+                suppressMessages(
+                    pathview::pathview(
+                        gene.data   = fc_entrez,
+                        pathway.id  = pw_num,
+                        species     = kegg_org,
+                        out.suffix  = contrast_id,
+                        kegg.dir    = ".",
+                        gene.idtype = "entrez",
+                        low  = list(gene = "#4575b4"),
+                        mid  = list(gene = "#ffffbf"),
+                        high = list(gene = "#d73027"),
+                        na.col = "grey80"
+                    )
+                )
+                old_f <- paste0(kegg_org, pw_num, ".", contrast_id, ".png")
+                new_f <- paste0(contrast_id, "_pathview_", kegg_org, pw_num, ".png")
+                if (file.exists(old_f)) {
+                    file.rename(old_f, new_f)
+                    message("    Pathview saved: ", new_f)
+                }
+            }, error = function(e) message("    Pathview failed (", pw_full, "): ", e$message))
+        }
+    }, error = function(e) message("  Pathview block failed: ", e$message))
+
     message("  KEGG done.")
 }, error = function(e) {
     message("  KEGG GSEA failed (offline or API issue): ", e$message)
-    # write empty file so process doesn't fail
     write.csv(data.frame(), file = paste0(contrast_id, "_KEGG_gsea.csv"),
               row.names = FALSE)
-})
-
-# ---- MSigDB Hallmarks -------------------------------------------------------
-message("Running MSigDB Hallmarks GSEA...")
-tryCatch({
-    msig_species <- if (opt$organism == "human") "Homo sapiens" else "Mus musculus"
-    h_sets   <- msigdbr(species = msig_species, category = "H")
-    h_list   <- split(h_sets$entrez_gene, h_sets$gs_name)
-    h_list   <- lapply(h_list, function(x) as.character(unique(x)))
-
-    set.seed(42)  # fgsea v1.32+ has no seed= param; use set.seed() instead
-    res_hall <- fgsea(pathways    = h_list,
-                      stats       = ranked_entrez,
-                      minSize     = opt$min_gs,
-                      maxSize     = opt$max_gs,
-                      nPermSimple = opt$n_perm,
-                      eps         = 0)
-    res_hall$padj <- p.adjust(res_hall$pval, method = "BH")
-    gsea_objects$hallmarks <<- data.table::copy(res_hall)  # save native data.table (leadingEdge as list)
-    # convert to data.frame to avoid data.table list-column issues in write.csv
-    res_hall_df <- as.data.frame(res_hall)
-    res_hall_df$leadingEdge <- sapply(res_hall_df$leadingEdge, paste, collapse = "/")
-
-    write.csv(res_hall_df, file = paste0(contrast_id, "_Hallmarks_gsea.csv"),
-              row.names = FALSE)
-
-    hall_plot <- res_hall %>%
-        rename(Description = pathway, NES = NES, size = size) %>%
-        mutate(size = as.numeric(size))
-    p <- make_dotplot(hall_plot, paste0("MSigDB Hallmarks — ", contrast_id))
-    if (!is.null(p)) save_plot(paste0(contrast_id, "_Hallmarks_dotplot"), p)
-    message("  Hallmarks done.")
-}, error = function(e) {
-    message("  Hallmarks GSEA failed: ", e$message)
-    write.csv(data.frame(), file = paste0(contrast_id, "_Hallmarks_gsea.csv"), row.names = FALSE)
 })
 
 # ---- Reactome ---------------------------------------------------------------
@@ -239,28 +263,35 @@ tryCatch({
                             verbose      = FALSE,
                             eps          = 0,
                             seed         = TRUE)
-    gsea_objects$reactome <<- res_react  # save gseaResult object
+    gsea_objects$reactome <- res_react
     df_react <- as.data.frame(res_react)
     write.csv(df_react, file = paste0(contrast_id, "_Reactome_gsea.csv"),
               row.names = FALSE)
     df_react$size <- sapply(strsplit(df_react$core_enrichment, "/"), length)
     p <- make_dotplot(df_react, paste0("Reactome — ", contrast_id))
     if (!is.null(p)) save_plot(paste0(contrast_id, "_Reactome_dotplot"), p)
+
+    p_ridge <- make_ridgeplot_s4(res_react, paste0("Reactome Ridgeplot — ", contrast_id))
+    if (!is.null(p_ridge)) {
+        n_sig <- sum(!is.na(df_react$p.adjust) & df_react$p.adjust < opt$pval_cutoff)
+        rh <- max(5, min(n_sig * 0.45 + 2, 16))
+        save_plot(paste0(contrast_id, "_Reactome_ridgeplot"), p_ridge, height = rh)
+    }
     message("  Reactome done.")
 }, error = function(e) {
     message("  Reactome GSEA failed (offline or API issue): ", e$message)
     write.csv(data.frame(), file = paste0(contrast_id, "_Reactome_gsea.csv"), row.names = FALSE)
 })
 
-# ---- save dashboard RDS (native enrichResult/gseResult objects) -------------
+# ---- save dashboard RDS (native gseaResult S4 objects) ----------------------
 rds_path <- paste0(contrast_id, "_gsea_dashboard_data.rds")
 saveRDS(gsea_objects, file = rds_path)
 message("Saved dashboard RDS: ", rds_path)
 
 # ---- versions ---------------------------------------------------------------
 ver <- sessionInfo()
-pkg_versions <- c("clusterProfiler", "fgsea", "msigdbr", "ReactomePA",
-                  "org.Hs.eg.db", "org.Mm.eg.db", "AnnotationDbi",
+pkg_versions <- c("clusterProfiler", "enrichplot", "ReactomePA", "pathview",
+                  "ggridges", "org.Hs.eg.db", "org.Mm.eg.db", "AnnotationDbi",
                   "ggplot2", "dplyr")
 ver_lines <- c("GSEA_ANALYSIS:",
                paste0("    R: ", ver$R.version$version.string))

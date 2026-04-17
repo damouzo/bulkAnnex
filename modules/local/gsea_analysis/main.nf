@@ -12,16 +12,18 @@ process GSEA_ANALYSIS {
     tuple val(meta), path(dge_results)
 
     output:
-    tuple val(meta), path("${meta.contrast_id}_GO_all_gsea.csv"),      optional: true, emit: go_results
-    tuple val(meta), path("${meta.contrast_id}_KEGG_gsea.csv"),         optional: true, emit: kegg_results
-    tuple val(meta), path("${meta.contrast_id}_Hallmarks_gsea.csv"),    optional: true, emit: hallmarks_results
-    tuple val(meta), path("${meta.contrast_id}_Reactome_gsea.csv"),     optional: true, emit: reactome_results
-    tuple val(meta), path("${meta.contrast_id}_gsea_dashboard_data.rds"), optional: true, emit: dashboard_rds
-    path "${meta.contrast_id}_GO_*_dotplot.{pdf,png}",                  optional: true, emit: go_plots
-    path "${meta.contrast_id}_KEGG_dotplot.{pdf,png}",                  optional: true, emit: kegg_plots
-    path "${meta.contrast_id}_Hallmarks_dotplot.{pdf,png}",             optional: true, emit: hallmarks_plots
-    path "${meta.contrast_id}_Reactome_dotplot.{pdf,png}",              optional: true, emit: reactome_plots
-    path 'versions.yml',                                                emit: versions
+    tuple val(meta), path("${meta.contrast_id}_GO_all_gsea.csv"),         optional: true, emit: go_results
+    tuple val(meta), path("${meta.contrast_id}_KEGG_gsea.csv"),            optional: true, emit: kegg_results
+    tuple val(meta), path("${meta.contrast_id}_Reactome_gsea.csv"),        optional: true, emit: reactome_results
+    tuple val(meta), path("${meta.contrast_id}_gsea_dashboard_data.rds"),  optional: true, emit: dashboard_rds
+    path "${meta.contrast_id}_GO_*_dotplot.{pdf,png}",                     optional: true, emit: go_plots
+    path "${meta.contrast_id}_GO_*_ridgeplot.{pdf,png}",                   optional: true, emit: go_ridgeplots
+    path "${meta.contrast_id}_KEGG_dotplot.{pdf,png}",                     optional: true, emit: kegg_plots
+    path "${meta.contrast_id}_KEGG_ridgeplot.{pdf,png}",                   optional: true, emit: kegg_ridgeplots
+    path "${meta.contrast_id}_pathview_*.png",                             optional: true, emit: pathview_plots
+    path "${meta.contrast_id}_Reactome_dotplot.{pdf,png}",                 optional: true, emit: reactome_plots
+    path "${meta.contrast_id}_Reactome_ridgeplot.{pdf,png}",               optional: true, emit: reactome_ridgeplots
+    path 'versions.yml',                                                   emit: versions
 
     when:
     task.ext.when == null || task.ext.when

@@ -10,8 +10,8 @@ suppressPackageStartupMessages({
     library(plotly)
     library(DT)
     library(enrichplot)
-    # ggridges is used internally by enrichplot::ridgeplot(); not loaded here
-    # so a missing package does not crash the app — ridgeplot tab shows an error message instead.
+    # ggridges is used by enrichplot::ridgeplot() and loaded as its dependency.
+    # The Ridgeplot tab falls back gracefully if it is unavailable.
 })
 
 # Null-coalescing operator (rlang-style) — used in modules without requiring rlang on the search path.
@@ -66,10 +66,9 @@ load_gsea_csv <- function(results_dir) {
     gsea_dir <- file.path(results_dir, "gsea")
     if (!dir.exists(gsea_dir)) return(list())
     patterns <- c(
-        go        = "_GO_all_gsea\\.csv$",
-        kegg      = "_KEGG_gsea\\.csv$",
-        hallmarks = "_Hallmarks_gsea\\.csv$",
-        reactome  = "_Reactome_gsea\\.csv$"
+        go       = "_GO_all_gsea\\.csv$",
+        kegg     = "_KEGG_gsea\\.csv$",
+        reactome = "_Reactome_gsea\\.csv$"
     )
     result <- list()
     for (db in names(patterns)) {
@@ -96,7 +95,7 @@ load_gsea_csv <- function(results_dir) {
 
 # Load native gseaResult / data.table objects saved by gsea_analysis.R.
 # Returns list keyed by contrast_id; each value is a named list:
-#   list(go_bp, go_mf, go_cc, kegg, hallmarks, reactome)
+#   list(go_bp, go_mf, go_cc, kegg, reactome)
 load_gsea_objects <- function(results_dir) {
     gsea_dir <- file.path(results_dir, "gsea")
     if (!dir.exists(gsea_dir)) return(list())
@@ -124,4 +123,40 @@ load_all_data <- function(results_dir = RESULTS_DIR) {
         gsea            = load_gsea_csv(results_dir),
         gsea_objects    = load_gsea_objects(results_dir)
     )
+}
+
+# Helper: return the path of the pre-rendered plot PNG saved by the pipeline,
+# or NULL if it does not exist.
+# type: "dotplot" or "ridgeplot"
+# Used by mod_gsea to serve fast static images.
+get_gsea_png <- function(results_dir, contrast, database, go_ont = "BP",
+                         type = "dotplot") {
+    gsea_dir <- file.path(results_dir, "gsea", contrast)
+    suffix <- if (type == "ridgeplot") "_ridgeplot.png" else "_dotplot.png"
+    filename <- switch(database,
+        "go"       = paste0(contrast, "_GO_", toupper(go_ont %||% "BP"), suffix),
+        "kegg"     = paste0(contrast, "_KEGG", suffix),
+        "reactome" = paste0(contrast, "_Reactome", suffix),
+        NULL
+    )
+    if (is.null(filename)) return(NULL)
+    f <- file.path(gsea_dir, filename)
+    if (file.exists(f)) f else NULL
+}
+
+# Helper: return named vector of pathview PNGs for a contrast.
+# Names are pathway IDs (e.g., "hsa04110"), values are full file paths.
+get_pathview_files <- function(results_dir, contrast) {
+    gsea_dir <- file.path(results_dir, "gsea", contrast)
+    if (!dir.exists(gsea_dir)) return(character(0))
+    files <- list.files(gsea_dir,
+                        pattern = paste0("_pathview_.*\\.png$"),
+                        full.names = TRUE)
+    if (length(files) == 0) return(character(0))
+    # Extract pathway IDs: {contrast_id}_pathview_{pathway_id}.png
+    pw_ids <- sub(paste0("^", gsub("([][{}()+*?.\\^$|])", "\\\\\\1", contrast),
+                         "_pathview_"), "",
+                  sub("\\.png$", "", basename(files)))
+    names(files) <- pw_ids
+    files
 }

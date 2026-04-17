@@ -62,6 +62,13 @@ ui <- page_navbar(
         mod_gene_explorer_ui("gene_explorer")
     ),
 
+    # ---- Tab 6: About -------------------------------------------------------
+    nav_panel(
+        title = "About",
+        icon  = icon("info-circle"),
+        mod_about_ui("about")
+    ),
+
     # ---- Footer spacer -------------------------------------------------------
     nav_spacer(),
     nav_item(

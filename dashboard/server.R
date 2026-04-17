@@ -11,9 +11,10 @@ server <- function(input, output, session) {
     })
 
     # ---- Module servers -----------------------------------------------------
-    mod_overview_server("overview",      app_data)
-    mod_qc_server("qc",                  app_data)
-    mod_dge_server("dge",                app_data)
-    mod_gsea_server("gsea",              app_data)
+    mod_overview_server("overview",           app_data)
+    mod_qc_server("qc",                       app_data)
+    mod_dge_server("dge",                     app_data)
+    mod_gsea_server("gsea",                   app_data)
     mod_gene_explorer_server("gene_explorer", app_data)
+    mod_about_server("about",                 app_data)
 }

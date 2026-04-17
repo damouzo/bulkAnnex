@@ -142,9 +142,7 @@ mod_gene_explorer_server <- function(id, app_data) {
             plot_ly(lfc_df,
                     x    = ~lfc,
                     y    = ~reorder(contrast, lfc),
-                    text = ~paste0("Contrast: ", contrast,
-                                   "<br>log2FC: ", round(lfc, 3),
-                                   "<br>padj: ", signif(padj, 3)),
+                    text = ~paste0("padj: ", signif(padj, 3)),
                     hoverinfo  = "text",
                     type       = "bar",
                     orientation = "h",
@@ -183,29 +181,49 @@ mod_gene_explorer_server <- function(id, app_data) {
             gene_id   <- input$selected_gene
             gene_name <- data()$vst$gene_name[data()$vst$gene_id == gene_id][1]
 
-            # Search for gene name in core_enrichment / leadingEdge columns
             gsea_data <- data()$gsea
             rows <- lapply(names(gsea_data), function(db) {
                 db_data <- gsea_data[[db]]
                 lapply(names(db_data), function(cid) {
                     df <- db_data[[cid]]
-                    le_col <- intersect(c("core_enrichment", "leadingEdge"), colnames(df))
+                    if (is.null(df) || nrow(df) == 0) return(NULL)
+
+                    # Normalise Description column
+                    if (!"Description" %in% colnames(df) && "pathway" %in% colnames(df))
+                        df$Description <- df$pathway
+
+                    # Normalise padj column
+                    if (!"padj" %in% colnames(df) && "p.adjust" %in% colnames(df))
+                        df$padj <- df$p.adjust
+                    if (!"padj" %in% colnames(df) && "pval" %in% colnames(df))
+                        df$padj <- p.adjust(df$pval, method = "BH")
+
+                    # Find leading-edge column
+                    le_col <- intersect(c("core_enrichment", "leadingEdge", "leading_edge"), colnames(df))
                     if (length(le_col) == 0) return(NULL)
                     col <- le_col[1]
+
                     mask <- grepl(gene_name, df[[col]], ignore.case = TRUE) |
                             grepl(gene_id,   df[[col]], ignore.case = TRUE)
-                    if (!any(mask)) return(NULL)
-                    df_hit <- df[mask, c("Description", "NES", "padj"), drop = FALSE]
+                    if (!any(mask, na.rm = TRUE)) return(NULL)
+
+                    cols_exist <- intersect(c("Description", "NES", "padj"), colnames(df))
+                    if (length(cols_exist) == 0) return(NULL)
+                    df_hit <- df[mask, cols_exist, drop = FALSE]
                     cbind(database = db, contrast = cid, df_hit)
                 })
             })
-            all_rows <- do.call(rbind, Filter(Negate(is.null), unlist(rows, recursive = FALSE)))
+
+            all_rows <- do.call(rbind, Filter(Negate(is.null),
+                                              unlist(rows, recursive = FALSE)))
             if (is.null(all_rows) || nrow(all_rows) == 0) {
-                return(datatable(data.frame(info = "Gene not found in any leading edge."),
-                                 rownames = FALSE))
+                return(datatable(
+                    data.frame(info = paste0(gene_name, " not found in any leading edge.")),
+                    rownames = FALSE, options = list(dom = "t")
+                ))
             }
-            all_rows$NES  <- round(all_rows$NES, 3)
-            all_rows$padj <- signif(all_rows$padj, 3)
+            if ("NES"  %in% colnames(all_rows)) all_rows$NES  <- round(all_rows$NES, 3)
+            if ("padj" %in% colnames(all_rows)) all_rows$padj <- signif(all_rows$padj, 3)
             datatable(all_rows, rownames = FALSE, class = "compact stripe",
                       options = list(pageLength = 15, scrollX = TRUE))
         })

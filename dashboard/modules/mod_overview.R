@@ -78,7 +78,7 @@ mod_overview_server <- function(id, app_data) {
 
         output$samplesheet_table <- renderDT({
             datatable(data()$samplesheet,
-                      options = list(pageLength = 10, scrollX = TRUE),
+                      options = list(pageLength = 25, scrollX = TRUE),
                       rownames = FALSE, class = "compact stripe")
         })
 

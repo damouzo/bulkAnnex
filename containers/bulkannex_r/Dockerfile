@@ -26,11 +26,12 @@ RUN Rscript -e " \
             'DESeq2', \
             'BiocParallel', \
             'clusterProfiler', \
+            'ReactomePA', \
             'fgsea', \
             'org.Hs.eg.db', \
             'org.Mm.eg.db', \
             'AnnotationDbi', \
-            'ReactomePA', \
+            'pathview', \
             'edgeR' \
         ), \
         ask    = FALSE, \
@@ -44,9 +45,9 @@ RUN Rscript -e " \
         c( \
             'optparse', \
             'ashr', \
-            'msigdbr', \
             'ggplot2', \
             'ggrepel', \
+            'ggridges', \
             'pheatmap', \
             'RColorBrewer', \
             'viridis', \
@@ -74,9 +75,9 @@ RUN Rscript -e " \
 
 # ---- Sanity check ------------------------------------------------------------
 RUN Rscript -e " \
-    pkgs <- c('DESeq2', 'GenomeInfoDbData', 'clusterProfiler', 'fgsea', \
-              'ReactomePA', 'org.Hs.eg.db', 'org.Mm.eg.db', 'ashr', \
-              'msigdbr', 'shiny'); \
+    pkgs <- c('DESeq2', 'GenomeInfoDbData', 'clusterProfiler', 'ReactomePA', 'fgsea', \
+              'pathview', 'org.Hs.eg.db', 'org.Mm.eg.db', 'ashr', \
+              'ggridges', 'shiny'); \
     missing <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]; \
     if (length(missing) > 0) stop('Missing packages: ', paste(missing, collapse=', ')); \
     message('All required packages present.') \

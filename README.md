@@ -32,7 +32,7 @@ nextflow run main.nf -profile test,singularity
 2. **QC** — library sizes, count distributions, PCA, correlation heatmap, dispersion
 3. **Normalization** — DESeq2 VST, fitted DDS saved for DGE reuse
 4. **DGE** — DESeq2 results per contrast, volcano, MA, top-gene heatmap
-5. **GSEA** — GO (BP/MF/CC), KEGG, MSigDB Hallmarks, Reactome via clusterProfiler/fgsea
+5. **GSEA** — GO (BP/MF/CC), KEGG, Reactome via clusterProfiler/ReactomePA + pathview
 6. **Dashboard** — self-contained Shiny app with 5 interactive tabs
 
 ---

@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DESEQ2_QC module: library sizes, PCA, correlation heatmap, dispersion
 - DESEQ2_NORMALIZATION module: VST normalization, filtered counts, fitted DDS
 - DESEQ2_DGE module: per-contrast differential expression with volcano, MA, heatmap plots
-- GSEA_ANALYSIS module: GO (BP/MF/CC), KEGG, MSigDB Hallmarks, Reactome enrichment
+- GSEA_ANALYSIS module: GO (BP/MF/CC), KEGG, Reactome enrichment; ridgeplots; pathview KEGG maps
 - SHINY_DASHBOARD module: interactive exploration of all results
 - Support for human (GRCh38) and mouse (GRCm39)
 - Auto-detection of batch variable in DESeq2 design formula
