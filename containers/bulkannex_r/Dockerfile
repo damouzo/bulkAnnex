@@ -1,4 +1,4 @@
-FROM rocker/bioconductor:3.20
+FROM bioconductor/bioconductor_docker:RELEASE_3_20
 
 LABEL org.opencontainers.image.title="bulkannex_r"
 LABEL org.opencontainers.image.description="R/Bioconductor environment for bulkAnnex bulk RNA-seq downstream analysis pipeline"
