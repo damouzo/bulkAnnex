@@ -77,11 +77,8 @@ RUN Rscript -e " \
 RUN Rscript -e " \
     required <- c('DESeq2', 'GenomeInfoDbData', 'clusterProfiler', 'ReactomePA', 'fgsea', \
               'org.Hs.eg.db', 'org.Mm.eg.db', 'ashr', \
-              'ggridges', 'shiny'); \
-    optional <- c('pathview'); \
+              'ggridges', 'shiny', 'pathview'); \
     missing  <- required[!sapply(required, requireNamespace, quietly = TRUE)]; \
     if (length(missing) > 0) stop('Missing required packages: ', paste(missing, collapse=', ')); \
-    miss_opt <- optional[!sapply(optional, requireNamespace, quietly = TRUE)]; \
-    if (length(miss_opt) > 0) message('WARNING: optional packages not found: ', paste(miss_opt, collapse=', ')); \
     message('All required packages present.') \
 "
