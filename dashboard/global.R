@@ -40,13 +40,30 @@ load_samplesheet <- function(results_dir) {
 }
 
 load_vst_counts <- function(results_dir) {
-    f <- file.path(results_dir, "normalization", "deseq2_vst_counts.tsv")
-    if (file.exists(f)) read.delim(f, check.names = FALSE, stringsAsFactors = FALSE)
-    else data.frame()
+    # Backward compat: single-group run writes VST flat in normalization/
+    flat <- file.path(results_dir, "normalization", "deseq2_vst_counts.tsv")
+    if (file.exists(flat)) {
+        return(read.delim(flat, check.names = FALSE, stringsAsFactors = FALSE))
+    }
+    # Multi-group run: use the global blind VST produced by the QC process
+    # (all samples together, suitable for PCA and gene explorer).
+    qc_vst <- file.path(results_dir, "qc", "qc_vst_matrix.tsv")
+    if (file.exists(qc_vst)) {
+        return(read.delim(qc_vst, check.names = FALSE, stringsAsFactors = FALSE))
+    }
+    data.frame()
 }
 
 load_qc_metrics <- function(results_dir) {
     f <- file.path(results_dir, "qc", "qc_metrics.csv")
+    if (file.exists(f)) read.csv(f, stringsAsFactors = FALSE, check.names = FALSE)
+    else data.frame()
+}
+
+# Returns validated_contrasts.csv with norm_group column (always present after
+# pipeline run; falls back to empty data.frame for pre-norm_group results).
+load_contrasts_meta <- function(results_dir) {
+    f <- file.path(results_dir, "pipeline_info", "validated_contrasts.csv")
     if (file.exists(f)) read.csv(f, stringsAsFactors = FALSE, check.names = FALSE)
     else data.frame()
 }
@@ -121,7 +138,8 @@ load_all_data <- function(results_dir = RESULTS_DIR) {
         qc_heatmap_path = file.path(results_dir, "qc", "qc_correlation_heatmap.png"),
         dge             = load_dge_results(results_dir),
         gsea            = load_gsea_csv(results_dir),
-        gsea_objects    = load_gsea_objects(results_dir)
+        gsea_objects    = load_gsea_objects(results_dir),
+        contrasts_meta  = load_contrasts_meta(results_dir)
     )
 }
 

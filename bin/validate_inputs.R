@@ -60,6 +60,18 @@ if ("batch" %in% colnames(ss)) {
     message("  No batch column: design will use ~ condition")
 }
 
+# norm_group: optional column; if absent, default to "all" (single global normalization)
+if ("norm_group" %in% colnames(ss)) {
+    stop_if(any(is.na(ss$norm_group) | ss$norm_group == ""),
+        "norm_group column contains empty or NA values.")
+    groups <- unique(ss$norm_group)
+    message(sprintf("  norm_group column detected: %d group(s): %s",
+                    length(groups), paste(groups, collapse = ", ")))
+} else {
+    ss$norm_group <- "all"
+    message("  No norm_group column: all samples normalised together (norm_group = 'all')")
+}
+
 # ---- validate contrasts -----------------------------------------------------
 message("Validating contrasts...")
 
@@ -74,19 +86,35 @@ stop_if(anyDuplicated(ct$contrast_id) > 0,
     paste0("Duplicate contrast_id values: ",
            paste(ct$contrast_id[duplicated(ct$contrast_id)], collapse = ", ")))
 
-# check that all referenced condition levels exist in samplesheet
+# norm_group: optional column in contrasts; if absent, default to "all"
+if ("norm_group" %in% colnames(ct)) {
+    stop_if(any(is.na(ct$norm_group) | ct$norm_group == ""),
+        "norm_group column in contrasts contains empty or NA values.")
+    # every norm_group referenced in contrasts must exist in the samplesheet
+    invalid_ng <- setdiff(ct$norm_group, ss$norm_group)
+    stop_if(length(invalid_ng) > 0,
+        paste0("Contrasts reference norm_group value(s) not found in samplesheet: ",
+               paste(invalid_ng, collapse = ", ")))
+} else {
+    ct$norm_group <- "all"
+}
+
+# check that all referenced condition levels exist within the contrast's norm_group
 for (i in seq_len(nrow(ct))) {
     var_col <- ct$variable[i]
-    stop_if(!var_col %in% colnames(ss),
+    ng      <- ct$norm_group[i]
+    # subset samplesheet to the norm_group that owns this contrast
+    ss_group <- if (ng == "all") ss else ss[ss$norm_group == ng, ]
+    stop_if(!var_col %in% colnames(ss_group),
         sprintf("Contrast '%s': variable '%s' not found in samplesheet columns.",
                 ct$contrast_id[i], var_col))
-    available_levels <- unique(ss[[var_col]])
+    available_levels <- unique(ss_group[[var_col]])
     stop_if(!ct$reference[i] %in% available_levels,
-        sprintf("Contrast '%s': reference '%s' not found in samplesheet column '%s'.",
-                ct$contrast_id[i], ct$reference[i], var_col))
+        sprintf("Contrast '%s': reference '%s' not found in norm_group '%s' samples (column '%s').",
+                ct$contrast_id[i], ct$reference[i], ng, var_col))
     stop_if(!ct$treatment[i] %in% available_levels,
-        sprintf("Contrast '%s': treatment '%s' not found in samplesheet column '%s'.",
-                ct$contrast_id[i], ct$treatment[i], var_col))
+        sprintf("Contrast '%s': treatment '%s' not found in norm_group '%s' samples (column '%s').",
+                ct$contrast_id[i], ct$treatment[i], ng, var_col))
     stop_if(ct$reference[i] == ct$treatment[i],
         sprintf("Contrast '%s': reference and treatment are the same ('%s').",
                 ct$contrast_id[i], ct$reference[i]))
@@ -109,11 +137,14 @@ warn_if(length(extra_in_counts) > 0,
            paste(extra_in_counts, collapse = ", ")))
 
 # ---- summary ----------------------------------------------------------------
+norm_groups <- unique(ss$norm_group)
 message(sprintf(
-    "Validation passed: %d samples, %d condition levels, %d contrasts.",
+    "Validation passed: %d samples, %d condition levels, %d contrasts, %d norm_group(s) [%s].",
     nrow(ss),
     length(unique(ss$condition)),
-    nrow(ct)
+    nrow(ct),
+    length(norm_groups),
+    paste(norm_groups, collapse = ", ")
 ))
 
 # ---- write validated copies -------------------------------------------------

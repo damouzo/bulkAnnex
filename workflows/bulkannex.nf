@@ -61,15 +61,28 @@ workflow BULKANNEX {
     )
     ch_versions = ch_versions.mix(QC.out.versions)
 
-    // ---- 3. Normalization (fit full DESeq2 model, save DDS) -----------------
-    DESEQ2_NORMALIZATION(
-        ch_counts,
-        INPUT_CHECK.out.samplesheet
-    )
+    // ---- 3. Normalization (one DESeq2 model per norm_group) -----------------
+    // Extract the unique norm_group values from the validated samplesheet and
+    // launch one DESEQ2_NORMALIZATION task per group.  When every sample has
+    // norm_group = "all" (no column supplied by the user) there is exactly one
+    // task and results land in normalization/ flat — identical to the old layout.
+    ch_norm_input = INPUT_CHECK.out.samplesheet
+        .splitCsv(header: true, strip: true)
+        .map { row -> row.norm_group }
+        .unique()
+        .combine(INPUT_CHECK.out.samplesheet)
+        .combine(ch_counts)
+        .map { grp, ss, counts ->
+            def meta = [norm_group: grp]
+            [meta, ss, counts]
+        }
+
+    DESEQ2_NORMALIZATION(ch_norm_input)
     ch_versions = ch_versions.mix(DESEQ2_NORMALIZATION.out.versions)
 
     // ---- 4. Build per-contrast channel with meta map -----------------------
-    //  Read contrasts CSV → one row per contrast → combine with DDS + VST
+    //  Read contrasts CSV → one row per contrast → join with the DDS + VST
+    //  that belongs to the same norm_group.
     ch_contrast_rows = INPUT_CHECK.out.contrasts
         .splitCsv(header: true, strip: true)
         .map { row ->
@@ -77,16 +90,24 @@ workflow BULKANNEX {
                 contrast_id : row.contrast_id,
                 variable    : row.variable,
                 reference   : row.reference,
-                treatment   : row.treatment
+                treatment   : row.treatment,
+                norm_group  : row.norm_group
             ]
-            return meta
+            [meta.norm_group, meta]
         }
 
-    // Combine each contrast meta with the shared DDS and VST outputs
+    // Key normalisation outputs by norm_group for the join
+    ch_dds_by_group = DESEQ2_NORMALIZATION.out.dds
+        .map { meta, dds -> [meta.norm_group, dds] }
+
+    ch_vst_by_group = DESEQ2_NORMALIZATION.out.vst_counts
+        .map { meta, vst -> [meta.norm_group, vst] }
+
+    // Each contrast is paired with the DDS and VST from its own norm_group
     ch_dge_input = ch_contrast_rows
-        .combine(DESEQ2_NORMALIZATION.out.dds)
-        .combine(DESEQ2_NORMALIZATION.out.vst_counts)
-        .map { meta, dds, vst -> [ meta, dds, vst ] }
+        .join(ch_dds_by_group)
+        .join(ch_vst_by_group)
+        .map { _grp, meta, dds, vst -> [meta, dds, vst] }
 
     // ---- 5. DGE + GSEA per contrast ----------------------------------------
     DGE_GSEA(

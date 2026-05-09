@@ -1,0 +1,3 @@
+contrast_id,variable,reference,treatment,norm_group
+GROUP1_CondB_vs_CondA,condition,CONDITION_A,CONDITION_B,GROUP_1
+GROUP2_CondD_vs_CondC,condition,CONDITION_C,CONDITION_D,GROUP_2

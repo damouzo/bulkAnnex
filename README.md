@@ -18,11 +18,73 @@ nextflow run main.nf -profile test,singularity
 
 | Parameter | Description |
 |-----------|-------------|
-| `--input` | `samplesheet.csv` — columns: `sample`, `condition`, `batch` (optional) |
+| `--input` | `samplesheet.csv` — columns: `sample`, `condition`, `batch` (optional), `norm_group` (optional) |
 | `--counts` | `salmon.merged.gene_counts.tsv` — gene_id, gene_name, one column per sample |
-| `--contrasts` | `contrasts.csv` — columns: `contrast_id`, `variable`, `reference`, `treatment` |
+| `--contrasts` | `contrasts.csv` — columns: `contrast_id`, `variable`, `reference`, `treatment`, `norm_group` (optional) |
 | `--organism` | `human` (default) or `mouse` |
 | `--outdir` | Output directory (default: `results`) |
+
+Copy-paste templates: [assets/samplesheet_template.csv](assets/samplesheet_template.csv) · [assets/contrasts_template.csv](assets/contrasts_template.csv)  
+Full worked example: [data_demo/samplesheet.csv](data_demo/samplesheet.csv) · [data_demo/contrasts.csv](data_demo/contrasts.csv)  
+Column reference: [docs/usage.md](docs/usage.md)
+
+---
+
+## Group-aware normalisation (`norm_group`)
+
+When an experiment mixes biologically distinct sample types (e.g. cell lines and primary patient cells), fitting a single DESeq2 model conflates their dispersion estimates. The optional `norm_group` column lets you run independent normalisation per group while keeping all downstream steps (DGE, GSEA, dashboard) unified.
+
+### How it works
+
+Add a `norm_group` column to both `samplesheet.csv` and `contrasts.csv`:
+
+```csv
+# samplesheet.csv
+sample,condition,norm_group
+NB4_Exp4_Scramble,NB4_Scramble,NB4
+NB4_Exp4_DDX41sh1,NB4_DDX41_sh1,NB4
+MSCline_Exp8_Scramble,MSCline_Scramble,MSCline
+HealthyDonor_MNC_H1,MNC_Healthy,MNC
+DDX41Patient_MNC_P1,MNC_DDX41_Patient,MNC
+
+# contrasts.csv
+contrast_id,variable,reference,treatment,norm_group
+NB4_DDX41_sh1_vs_Scramble,condition,NB4_Scramble,NB4_DDX41_sh1,NB4
+MSCline_DDX41_sh1_vs_Scramble,condition,MSCline_Scramble,MSCline_DDX41_sh1,MSCline
+MNC_DDX41_Patient_vs_Healthy,condition,MNC_Healthy,MNC_DDX41_Patient,MNC
+```
+
+- Each `norm_group` runs DESeq2 on its own samples only → dispersion estimated within-group.
+- QC (PCA, library sizes, correlation heatmap) always uses **all samples together** for a global overview.
+- `dge/` and `gsea/` output directories remain flat — contrast IDs are unique across groups.
+- **Backward compatible**: omitting `norm_group` is equivalent to `norm_group = "all"` for every row; output structure is identical to previous runs.
+
+### Output structure with norm_group
+
+```
+results/
+├── qc/                          # global QC — all samples
+├── normalization/
+│   ├── NB4/                     # DESeq2 model for NB4 samples only
+│   │   ├── deseq2_dds.rds
+│   │   └── deseq2_vst_counts.tsv
+│   ├── MSCline/
+│   ├── MNC/
+│   └── MSC/
+├── dge/                         # flat — one dir per contrast_id (unchanged)
+└── gsea/
+```
+
+Without `norm_group` (or all rows set to `"all"`):
+
+```
+results/
+├── normalization/               # flat — single DESeq2 model (previous behaviour)
+│   ├── deseq2_dds.rds
+│   └── deseq2_vst_counts.tsv
+├── dge/
+└── gsea/
+```
 
 ---
 

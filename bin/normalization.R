@@ -10,6 +10,8 @@ suppressPackageStartupMessages({
 option_list <- list(
     make_option("--counts",      type = "character", help = "Counts matrix TSV (gene_id, gene_name, samples...)"),
     make_option("--samplesheet", type = "character", help = "Validated samplesheet CSV"),
+    make_option("--norm_group",  type = "character", default = "all",
+                help = "Norm group to subset samplesheet to (default: 'all' = no subsetting)"),
     make_option("--prefix",      type = "character", default = "deseq2",
                 help = "Output file prefix [default: deseq2]"),
     make_option("--min_counts",  type = "integer",   default = 10,
@@ -26,6 +28,19 @@ rownames(counts_raw) <- counts_raw$gene_id
 
 message("Loading samplesheet...")
 ss <- read.csv(opt$samplesheet, stringsAsFactors = FALSE, check.names = FALSE)
+
+# subset to norm_group if specified
+if (!is.null(opt$norm_group) && opt$norm_group != "all") {
+    if ("norm_group" %in% colnames(ss)) {
+        ss <- ss[ss$norm_group == opt$norm_group, ]
+        message(sprintf("Subsetting to norm_group '%s': %d samples retained.",
+                        opt$norm_group, nrow(ss)))
+        if (nrow(ss) == 0) stop("No samples remain after norm_group filter.", call. = FALSE)
+    } else {
+        warning("--norm_group specified but samplesheet has no norm_group column; using all samples.")
+    }
+}
+
 rownames(ss) <- ss$sample
 
 # enforce factor levels: reference level for condition = first alphabetical

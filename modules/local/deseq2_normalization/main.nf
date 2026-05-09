@@ -1,22 +1,25 @@
 process DESEQ2_NORMALIZATION {
-    tag "normalization"
+    tag "${meta.norm_group}"
     label 'process_medium'
 
     container params.container
 
-    publishDir "${params.outdir}/normalization", mode: params.publish_dir_mode, saveAs: { filename ->
-        if (filename == 'versions.yml') null else filename
-    }
+    publishDir [
+        path: { meta.norm_group == "all"
+            ? "${params.outdir}/normalization"
+            : "${params.outdir}/normalization/${meta.norm_group}" },
+        mode: params.publish_dir_mode,
+        saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+    ]
 
     input:
-    path counts
-    path samplesheet
+    tuple val(meta), path(samplesheet), path(counts)
 
     output:
-    path 'deseq2_dds.rds',          emit: dds
-    path 'deseq2_vst_counts.tsv',   emit: vst_counts
-    path 'deseq2_size_factors.csv', emit: size_factors
-    path 'versions.yml',            emit: versions
+    tuple val(meta), path('deseq2_dds.rds'),          emit: dds
+    tuple val(meta), path('deseq2_vst_counts.tsv'),   emit: vst_counts
+    tuple val(meta), path('deseq2_size_factors.csv'), emit: size_factors
+    path 'versions.yml',                               emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -27,6 +30,7 @@ process DESEQ2_NORMALIZATION {
     Rscript ${projectDir}/bin/normalization.R \\
         --counts      ${counts} \\
         --samplesheet ${samplesheet} \\
+        --norm_group  ${meta.norm_group} \\
         --prefix      deseq2 \\
         ${args}
     """

@@ -3,26 +3,47 @@
 ## Samplesheet format
 
 ```csv
-sample,condition,batch
-NB4_Exp4_Scramble,Scramble,Exp4
-NB4_Exp4_DDX41sh1,DDX41_sh1,Exp4
+sample,condition,batch,norm_group
+NB4_Exp4_Scramble,NB4_Scramble,Exp4,NB4
+NB4_Exp4_DDX41sh1,NB4_DDX41_sh1,Exp4,NB4
+MSCline_Exp8_Scramble,MSCline_Scramble,Exp8,MSCline
+DDX41Patient_MNC_P1,MNC_DDX41_Patient,,MNC
 ```
 
-- `sample` must exactly match column names in the counts matrix.
-- `condition` is required. Must be a valid R variable name (no spaces or hyphens — use underscores).
-- `batch` is optional. If present, DESeq2 design becomes `~ batch + condition`.
+| Column | Required | Description |
+|--------|----------|-------------|
+| `sample` | Yes | Sample name. Must exactly match a column header in the counts matrix. No spaces. |
+| `condition` | Yes | Experimental condition. Must be a valid R identifier (use underscores, not spaces or hyphens). |
+| `batch` | No | Batch covariate. If present, DESeq2 design becomes `~ batch + condition`. All rows must have a value if the column exists. |
+| `norm_group` | No | Normalisation group. Samples sharing the same value are fitted in a single DESeq2 model. Omit (or set to `all`) to normalise all samples together. See [Group-aware normalisation](#group-aware-normalisation) below. |
 
 ## Contrasts format
 
 ```csv
-contrast_id,variable,reference,treatment
-DDX41_sh1_vs_Scramble,condition,Scramble,DDX41_sh1
+contrast_id,variable,reference,treatment,norm_group
+NB4_DDX41_sh1_vs_Scramble,condition,NB4_Scramble,NB4_DDX41_sh1,NB4
+MSCline_DDX41_sh1_vs_Scramble,condition,MSCline_Scramble,MSCline_DDX41_sh1,MSCline
+MNC_DDX41_Patient_vs_Healthy,condition,MNC_Healthy,MNC_DDX41_Patient,MNC
 ```
 
-- `contrast_id`: used as output file prefix. No spaces.
-- `variable`: must match a column in the samplesheet.
-- `reference`: the denominator group (e.g., control).
-- `treatment`: the numerator group.
+| Column | Required | Description |
+|--------|----------|-------------|
+| `contrast_id` | Yes | Unique identifier for the contrast. Used as output directory name and file prefix. No spaces. |
+| `variable` | Yes | Column in the samplesheet to test (typically `condition`). |
+| `reference` | Yes | Reference level (denominator, e.g. control). Must be a value present in the `variable` column **within the norm_group**. |
+| `treatment` | Yes | Treatment level (numerator). Must be a value present in the `variable` column **within the norm_group**. |
+| `norm_group` | No | Must match a `norm_group` value in the samplesheet. The contrast is computed against the DESeq2 model fitted for that group. Omit to use the global model. |
+
+## Group-aware normalisation
+
+When an experiment mixes biologically distinct sample types (e.g. cell lines and primary patient cells), a single global DESeq2 model can distort dispersion estimates. Adding `norm_group` runs one independent DESeq2 normalisation per group:
+
+- Each `norm_group` runs DESeq2 on its own samples only.
+- QC (PCA, library sizes, heatmap) always uses **all samples together**.
+- `dge/` and `gsea/` output directories remain flat — contrast IDs are globally unique.
+- Omitting `norm_group` is fully backward compatible (equivalent to `norm_group = all`).
+
+See `data_demo/samplesheet.csv` and `data_demo/contrasts.csv` for a complete worked example with four independent normalisation groups (NB4, MSCline, MNC, MSC).
 
 ## Counts matrix format
 
