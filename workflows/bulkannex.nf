@@ -103,10 +103,13 @@ workflow BULKANNEX {
     ch_vst_by_group = DESEQ2_NORMALIZATION.out.vst_counts
         .map { meta, vst -> [meta.norm_group, vst] }
 
-    // Each contrast is paired with the DDS and VST from its own norm_group
+    // Each contrast is paired with the DDS and VST from its own norm_group.
+    // Use combine(by: 0) — NOT join() — because join() is 1-to-1 and would
+    // discard all but the first contrast per norm_group when keys repeat.
+    // combine(by: 0) does a keyed cartesian product: N contrasts × 1 DDS → N pairs.
     ch_dge_input = ch_contrast_rows
-        .join(ch_dds_by_group)
-        .join(ch_vst_by_group)
+        .combine(ch_dds_by_group, by: 0)
+        .combine(ch_vst_by_group, by: 0)
         .map { _grp, meta, dds, vst -> [meta, dds, vst] }
 
     // ---- 5. DGE + GSEA per contrast ----------------------------------------

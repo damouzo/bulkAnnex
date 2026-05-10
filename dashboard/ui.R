@@ -12,13 +12,15 @@ lapply(list.files("modules", pattern = "\\.R$", full.names = TRUE), source)
 
 ui <- page_navbar(
     title = tags$span(
-        tags$img(src = "bulkannex_logo.png", height = "30px", style = "margin-right: 8px;"),
+        tags$img(src = "bulkannex_logo.svg", height = "28px",
+                 style = "margin-right: 8px; vertical-align: middle;"),
         "bulkAnnex"
     ),
     theme = bs_theme(
         bootswatch  = "flatly",
-        primary     = "#2c3e50",
-        secondary   = "#18bc9c",
+        primary     = "#6F42C1",
+        secondary   = "#007BFF",
+        info        = "#17A2B8",
         base_font   = font_google("Inter"),
         code_font   = font_google("Source Code Pro")
     ),

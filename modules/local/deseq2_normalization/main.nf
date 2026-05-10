@@ -4,13 +4,11 @@ process DESEQ2_NORMALIZATION {
 
     container params.container
 
-    publishDir [
-        path: { meta.norm_group == "all"
+    publishDir { meta.norm_group == "all"
             ? "${params.outdir}/normalization"
             : "${params.outdir}/normalization/${meta.norm_group}" },
         mode: params.publish_dir_mode,
         saveAs: { filename -> filename == 'versions.yml' ? null : filename }
-    ]
 
     input:
     tuple val(meta), path(samplesheet), path(counts)

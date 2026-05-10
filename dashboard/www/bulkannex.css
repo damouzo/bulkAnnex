@@ -1,55 +1,158 @@
 /* bulkAnnex dashboard — custom styles */
 
-/* Navbar */
+/* ── Palette ─────────────────────────────────────────────────────────────── */
+:root {
+    --ba-primary:     #6F42C1;
+    --ba-primary-dk:  #5a32a3;
+    --ba-blue:        #007BFF;
+    --ba-teal:        #17A2B8;
+    --ba-turquoise:   #00CCCC;
+    --ba-cyan:        #0DCAF0;
+    --ba-pale:        #f0eef8;
+}
+
+/* ── Navbar ──────────────────────────────────────────────────────────────── */
+.navbar {
+    background-color: var(--ba-primary) !important;
+    border-bottom: 2px solid var(--ba-primary-dk) !important;
+}
+
+.navbar-brand,
+.navbar-brand:hover,
+.navbar .navbar-nav .nav-link {
+    color: #fff !important;
+}
+
+.navbar .navbar-nav .nav-link:hover {
+    color: var(--ba-cyan) !important;
+}
+
+/* Active tab — underline indicator */
+.navbar .navbar-nav .nav-link.active {
+    color: #fff !important;
+    border-bottom: 3px solid var(--ba-cyan) !important;
+    padding-bottom: calc(0.5rem - 3px) !important;
+}
+
 .navbar-brand img {
     vertical-align: middle;
 }
 
-/* Cards */
+/* Footer badge */
+.navbar-nav .text-muted {
+    padding: 0.5rem 1rem;
+    line-height: 2.5;
+    color: rgba(255,255,255,0.65) !important;
+}
+
+/* ── Page body ───────────────────────────────────────────────────────────── */
+body {
+    background-color: #F5F4FA;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
 .card {
     border-radius: 6px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
     margin-bottom: 16px;
 }
 
 .card-header {
     font-weight: 600;
-    font-size: 0.95rem;
-    background-color: #f8f9fa;
-    border-bottom: 1px solid #e9ecef;
+    font-size: 0.92rem;
+    background-color: var(--ba-pale) !important;
+    color: #2c3e50;
+    border-bottom: 1px solid #d6d0ee;
 }
 
-/* Value boxes */
+/* ── Value boxes (compact) ───────────────────────────────────────────────── */
 .bslib-value-box .value-box-value {
-    font-size: 2rem;
+    font-size: 1.75rem;
     font-weight: 700;
 }
 
-/* Tables */
+.bslib-value-box .value-box-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.92;
+}
+
+/* ── Custom KPI cards (ba_kpi) ───────────────────────────────────────────── */
+.ba-kpi {
+    display: flex;
+    align-items: center;
+    border-radius: 8px;
+    padding: 12px 14px;
+    height: 100px;
+    color: white;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+
+/* Icon column: 38% width, centred, large */
+.ba-kpi-icon {
+    flex: 0 0 38%;
+    text-align: center;
+    font-size: 2.1rem;
+    opacity: 0.85;
+}
+
+/* Text column: fills remainder, centred */
+.ba-kpi-body {
+    flex: 1;
+    text-align: center;
+    min-width: 0;
+}
+
+.ba-kpi-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    opacity: 0.90;
+    margin-bottom: 4px;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.2;
+}
+
+.ba-kpi-value {
+    font-size: 1.9rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
 table.dataTable td, table.dataTable th {
     font-size: 0.85rem;
 }
 
-/* Plotly charts */
+/* ── Plotly ──────────────────────────────────────────────────────────────── */
 .plotly {
     border-radius: 4px;
 }
 
-/* Search button */
-.btn-primary {
+/* ── Form inputs — focus ring in palette colour ──────────────────────────── */
+.form-control:focus,
+.selectize-input.focus {
+    border-color: var(--ba-primary);
+    box-shadow: 0 0 0 0.2rem rgba(111, 66, 193, 0.20);
+}
+
+/* ── Gene Explorer search button ─────────────────────────────────────────── */
+#gene_explorer-search_btn {
     width: 100%;
     margin-top: 4px;
 }
 
-/* Footer */
-.navbar-nav .text-muted {
-    padding: 0.5rem 1rem;
-    line-height: 2.5;
-}
-
-/* Responsive tweaks */
+/* ── Responsive tweaks ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
     .bslib-value-box .value-box-value {
-        font-size: 1.4rem;
+        font-size: 1.3rem;
     }
+}
+
+/* Also update the SVG logo background to match new primary */
+.navbar-brand img[src$=".svg"] {
+    filter: none;
 }

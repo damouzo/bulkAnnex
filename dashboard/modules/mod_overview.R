@@ -1,5 +1,22 @@
 # modules/mod_overview.R — Overview tab
 
+# Compact KPI card: icon on the left, label + value stacked on the right.
+# Using plain HTML/CSS instead of bslib value_box() to avoid icon clipping
+# that occurs in narrow Bootstrap columns regardless of showcase_layout setting.
+ba_kpi <- function(icon_name, label, value_id, bg, ns) {
+    tags$div(
+        class = "ba-kpi",
+        style = paste0("background-color:", bg, ";"),
+        tags$div(class = "ba-kpi-icon", icon(icon_name)),
+        tags$div(
+            class = "ba-kpi-body",
+            tags$div(class = "ba-kpi-label", label),
+            tags$div(class = "ba-kpi-value",
+                     textOutput(ns(value_id), inline = TRUE))
+        )
+    )
+}
+
 mod_overview_ui <- function(id) {
     ns <- NS(id)
     tagList(
@@ -10,38 +27,11 @@ mod_overview_ui <- function(id) {
             )
         ),
         fluidRow(
-            column(3,
-                value_box(
-                    title    = "Samples",
-                    value    = textOutput(ns("n_samples")),
-                    showcase = icon("vials"),
-                    theme    = "primary"
-                )
-            ),
-            column(3,
-                value_box(
-                    title    = "Conditions",
-                    value    = textOutput(ns("n_conditions")),
-                    showcase = icon("layer-group"),
-                    theme    = "secondary"
-                )
-            ),
-            column(3,
-                value_box(
-                    title    = "Contrasts",
-                    value    = textOutput(ns("n_contrasts")),
-                    showcase = icon("not-equal"),
-                    theme    = "info"
-                )
-            ),
-            column(3,
-                value_box(
-                    title    = "DEGs (any contrast)",
-                    value    = textOutput(ns("n_degs")),
-                    showcase = icon("dna"),
-                    theme    = "success"
-                )
-            )
+            column(2, ba_kpi("vials",        "Samples",                     "n_samples",     "#6F42C1", ns)),
+            column(2, ba_kpi("object-group", "Norm groups",                 "n_norm_groups", "#007BFF", ns)),
+            column(2, ba_kpi("layer-group",  "Conditions",                  "n_conditions",  "#17A2B8", ns)),
+            column(3, ba_kpi("not-equal",    "Contrasts",                   "n_contrasts",   "#6F42C1", ns)),
+            column(3, ba_kpi("dna",          "DEGs\u00a0(max,\u00a0FDR\u00a0<\u00a00.05)", "n_degs", "#007BFF", ns))
         ),
         fluidRow(
             column(6,
@@ -66,6 +56,10 @@ mod_overview_server <- function(id, app_data) {
 
         output$n_samples    <- renderText(nrow(data()$samplesheet))
         output$n_conditions <- renderText(length(unique(data()$samplesheet$condition)))
+        output$n_norm_groups <- renderText({
+            ss <- data()$samplesheet
+            if ("norm_group" %in% colnames(ss)) length(unique(ss$norm_group)) else 1L
+        })
         output$n_contrasts  <- renderText(length(data()$dge))
         output$n_degs <- renderText({
             if (length(data()$dge) == 0) return(0)

@@ -10,6 +10,7 @@ suppressPackageStartupMessages({
     library(clusterProfiler)
     library(enrichplot)
     library(ReactomePA)
+    library(pathview)
     library(org.Hs.eg.db)
     library(org.Mm.eg.db)
     library(AnnotationDbi)
@@ -196,8 +197,14 @@ tryCatch({
                         eps          = 0,
                         seed         = TRUE,
                         use_internal_data = FALSE)
-    gsea_objects$kegg <- res_kegg
-    df_kegg <- as.data.frame(res_kegg)
+    # setReadable converts Entrez IDs in core_enrichment to gene symbols so the
+    # dashboard membership table can search by gene name.
+    res_kegg_readable <- tryCatch(
+        setReadable(res_kegg, OrgDb = org_db, keyType = "ENTREZID"),
+        error = function(e) { message("  setReadable (KEGG) failed: ", e$message); res_kegg }
+    )
+    gsea_objects$kegg <- res_kegg_readable
+    df_kegg <- as.data.frame(res_kegg_readable)
     write.csv(df_kegg, file = paste0(contrast_id, "_KEGG_gsea.csv"),
               row.names = FALSE)
     df_kegg$size <- sapply(strsplit(df_kegg$core_enrichment, "/"), length)
@@ -215,30 +222,39 @@ tryCatch({
     message("  Generating Pathview for top KEGG pathways...")
     tryCatch({
         fc_entrez   <- setNames(dge_mapped$log2FoldChange, as.character(dge_mapped$entrez_id))
-        df_kegg_sig <- df_kegg[order(df_kegg$p.adjust), ]
+        # Filter to significant pathways first, then take top 10 by p.adjust
+        df_kegg_sig <- df_kegg[!is.na(df_kegg$p.adjust) & df_kegg$p.adjust < opt$pval_cutoff, ]
+        df_kegg_sig <- df_kegg_sig[order(df_kegg_sig$p.adjust), ]
         top10_ids   <- head(df_kegg_sig$ID, 10)
+        if (length(top10_ids) == 0) {
+            message("  No significant KEGG pathways (p.adjust < ", opt$pval_cutoff, ") — skipping Pathview.")
+        } else {
+            message("  Generating Pathview for ", length(top10_ids), " significant KEGG pathways...")
+        }
         for (pw_full in top10_ids) {
             pw_num <- sub("^[a-z]+", "", pw_full)  # "hsa04110" → "04110"
+            message("    Processing pathway: ", pw_full)
             tryCatch({
-                suppressMessages(
-                    pathview::pathview(
-                        gene.data   = fc_entrez,
-                        pathway.id  = pw_num,
-                        species     = kegg_org,
-                        out.suffix  = contrast_id,
-                        kegg.dir    = ".",
-                        gene.idtype = "entrez",
-                        low  = list(gene = "#4575b4"),
-                        mid  = list(gene = "#ffffbf"),
-                        high = list(gene = "#d73027"),
-                        na.col = "grey80"
-                    )
+                pathview(
+                    gene.data   = fc_entrez,
+                    pathway.id  = pw_num,
+                    species     = kegg_org,
+                    out.suffix  = contrast_id,
+                    kegg.dir    = ".",
+                    gene.idtype = "entrez",
+                    low  = list(gene = "#4575b4"),
+                    mid  = list(gene = "#ffffbf"),
+                    high = list(gene = "#d73027"),
+                    na.col = "grey80"
                 )
                 old_f <- paste0(kegg_org, pw_num, ".", contrast_id, ".png")
                 new_f <- paste0(contrast_id, "_pathview_", kegg_org, pw_num, ".png")
                 if (file.exists(old_f)) {
                     file.rename(old_f, new_f)
                     message("    Pathview saved: ", new_f)
+                } else {
+                    message("    Pathview: expected file not found: ", old_f)
+                    message("    Files in CWD: ", paste(list.files(".", pattern="\\.png$"), collapse=", "))
                 }
             }, error = function(e) message("    Pathview failed (", pw_full, "): ", e$message))
         }
@@ -263,8 +279,13 @@ tryCatch({
                             verbose      = FALSE,
                             eps          = 0,
                             seed         = TRUE)
-    gsea_objects$reactome <- res_react
-    df_react <- as.data.frame(res_react)
+    # setReadable converts Entrez IDs in core_enrichment to gene symbols.
+    res_react_readable <- tryCatch(
+        setReadable(res_react, OrgDb = org_db, keyType = "ENTREZID"),
+        error = function(e) { message("  setReadable (Reactome) failed: ", e$message); res_react }
+    )
+    gsea_objects$reactome <- res_react_readable
+    df_react <- as.data.frame(res_react_readable)
     write.csv(df_react, file = paste0(contrast_id, "_Reactome_gsea.csv"),
               row.names = FALSE)
     df_react$size <- sapply(strsplit(df_react$core_enrichment, "/"), length)

@@ -72,17 +72,19 @@ mod_gene_explorer_server <- function(id, app_data) {
             ss  <- data()$samplesheet
             if (nrow(vst) == 0 || !input$selected_gene %in% vst$gene_id) return(NULL)
 
-            expr_row <- vst[vst$gene_id == input$selected_gene, , drop = FALSE]
-            sample_cols <- ss$sample
+            expr_row    <- vst[vst$gene_id == input$selected_gene, , drop = FALSE]
+            # Only include samples present in both samplesheet and VST (multi-group safe)
+            sample_cols <- intersect(ss$sample, colnames(vst))
+            if (length(sample_cols) == 0) return(NULL)
             expr_vals <- as.numeric(expr_row[1, sample_cols])
 
             df <- data.frame(
                 sample    = sample_cols,
                 vst_expr  = expr_vals,
-                condition = ss$condition,
+                condition = ss$condition[match(sample_cols, ss$sample)],
                 stringsAsFactors = FALSE
             )
-            if ("batch" %in% colnames(ss)) df$batch <- ss$batch
+            if ("batch" %in% colnames(ss)) df$batch <- ss$batch[match(sample_cols, ss$sample)]
             df
         })
 
@@ -203,19 +205,53 @@ mod_gene_explorer_server <- function(id, app_data) {
                     if (length(le_col) == 0) return(NULL)
                     col <- le_col[1]
 
-                    mask <- grepl(gene_name, df[[col]], ignore.case = TRUE) |
-                            grepl(gene_id,   df[[col]], ignore.case = TRUE)
+                    # Determine search terms: always try gene_id (Ensembl) and gene_name (symbol).
+                    # For KEGG/Reactome with old results (core_enrichment = Entrez IDs),
+                    # also try to resolve the Entrez ID via AnnotationDbi if available.
+                    search_terms <- c(gene_id, gene_name)
+                    if (all(grepl("^[0-9/]+$", na.omit(df[[col]])))) {
+                        # core_enrichment looks like Entrez IDs — try live mapping
+                        entrez_id <- tryCatch({
+                            if (requireNamespace("AnnotationDbi", quietly = TRUE)) {
+                                org_pkg <- if (exists("org.Hs.eg.db", envir = .GlobalEnv, inherits = TRUE) ||
+                                               "org.Hs.eg.db" %in% rownames(installed.packages()))
+                                               get("org.Hs.eg.db",
+                                                   envir = asNamespace("org.Hs.eg.db"))
+                                           else NULL
+                                if (!is.null(org_pkg))
+                                    AnnotationDbi::mapIds(org_pkg, keys = gene_id,
+                                                          column = "ENTREZID",
+                                                          keytype = "ENSEMBL",
+                                                          multiVals = "first")
+                                else NA_character_
+                            } else NA_character_
+                        }, error = function(e) NA_character_)
+                        if (!is.na(entrez_id)) search_terms <- c(search_terms, entrez_id)
+                    }
+
+                    mask <- Reduce(`|`, lapply(search_terms, function(term) {
+                        grepl(term, df[[col]], ignore.case = TRUE, fixed = TRUE)
+                    }))
                     if (!any(mask, na.rm = TRUE)) return(NULL)
 
-                    cols_exist <- intersect(c("Description", "NES", "padj"), colnames(df))
+                    cols_exist <- intersect(c("Description", "ontology", "NES", "padj"), colnames(df))
                     if (length(cols_exist) == 0) return(NULL)
                     df_hit <- df[mask, cols_exist, drop = FALSE]
-                    cbind(database = db, contrast = cid, df_hit)
+                    # Ensure every row has the same fixed column set (NA for missing cols).
+                    # This prevents rbind() failing when GO rows have 'ontology' but
+                    # KEGG/Reactome rows do not.
+                    for (col_std in c("Description", "ontology", "NES", "padj")) {
+                        if (!col_std %in% colnames(df_hit))
+                            df_hit[[col_std]] <- NA
+                    }
+                    df_hit <- df_hit[, c("Description", "ontology", "NES", "padj"), drop = FALSE]
+                    data.frame(database = db, contrast = cid, df_hit,
+                               stringsAsFactors = FALSE, check.names = FALSE)
                 })
             })
 
-            all_rows <- do.call(rbind, Filter(Negate(is.null),
-                                              unlist(rows, recursive = FALSE)))
+            all_rows <- dplyr::bind_rows(Filter(Negate(is.null),
+                                                unlist(rows, recursive = FALSE)))
             if (is.null(all_rows) || nrow(all_rows) == 0) {
                 return(datatable(
                     data.frame(info = paste0(gene_name, " not found in any leading edge.")),

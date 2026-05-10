@@ -40,16 +40,23 @@ load_samplesheet <- function(results_dir) {
 }
 
 load_vst_counts <- function(results_dir) {
-    # Backward compat: single-group run writes VST flat in normalization/
-    flat <- file.path(results_dir, "normalization", "deseq2_vst_counts.tsv")
-    if (file.exists(flat)) {
-        return(read.delim(flat, check.names = FALSE, stringsAsFactors = FALSE))
-    }
-    # Multi-group run: use the global blind VST produced by the QC process
-    # (all samples together, suitable for PCA and gene explorer).
+    # Always prefer the global blind VST from QC (all samples, blind=TRUE).
+    # This is the standard DESeq2 approach for visualisation (PCA, Gene Explorer,
+    # Count Distribution) — it is not confounded by norm_group boundaries and is
+    # 100% valid for cross-group comparisons in exploratory plots.
+    #
+    # The per-norm_group VSTs in normalization/<group>/deseq2_vst_counts.tsv are
+    # only needed for DGE; when multiple groups run they OVERWRITE each other
+    # under normalization/ (flat publish), so we NEVER use that file for the
+    # dashboard.
     qc_vst <- file.path(results_dir, "qc", "qc_vst_matrix.tsv")
     if (file.exists(qc_vst)) {
         return(read.delim(qc_vst, check.names = FALSE, stringsAsFactors = FALSE))
+    }
+    # Legacy single-group runs that pre-date the QC blind-VST output.
+    flat <- file.path(results_dir, "normalization", "deseq2_vst_counts.tsv")
+    if (file.exists(flat)) {
+        return(read.delim(flat, check.names = FALSE, stringsAsFactors = FALSE))
     }
     data.frame()
 }
@@ -135,6 +142,7 @@ load_all_data <- function(results_dir = RESULTS_DIR) {
         samplesheet     = load_samplesheet(results_dir),
         vst             = load_vst_counts(results_dir),
         qc_metrics      = load_qc_metrics(results_dir),
+        qc_basedir      = file.path(results_dir, "qc"),
         qc_heatmap_path = file.path(results_dir, "qc", "qc_correlation_heatmap.png"),
         dge             = load_dge_results(results_dir),
         gsea            = load_gsea_csv(results_dir),
