@@ -104,10 +104,6 @@ mod_gsea_server <- function(id, app_data) {
                                                         "KEGG"       = "KEGG",
                                                         "Reactome"   = "Reactome"),
                                             selected = "GO_BP"),
-                                tags$p(class = "text-muted small",
-                                       icon("circle-info"),
-                                       " Pipeline precomputes all databases.",
-                                       " Missing databases recompute on Apply (~5 min)."),
                                 numericInput(ns("td_top_paths"), "Top pathways / contrast",
                                              value = 5, min = 1, max = 20),
                                 numericInput(ns("td_clust_num"), "Dendrogram clusters",
@@ -506,22 +502,30 @@ mod_gsea_server <- function(id, app_data) {
         }, deleteFile = FALSE)
 
         # ---- TreeDot --------------------------------------------------------
-        # td_gsea_db is NOT isolated → dropdown change triggers re-render automatically.
-        # Priority per render:
-        #   1. Precomputed PNG from pipeline (instant)
-        #   2. Precomputed RDS rendered with current params (fast, no GSEA recompute)
-        #   3. build_treedot_cmp() recompute from DGE — only when Apply is clicked
-        #      and neither PNG nor RDS exists for the selected database
+        # last_applied_tag: tracks which database tag was active when Apply was
+        # last clicked. Reset to NULL when the database dropdown changes, so that
+        # selecting a new database reverts to the precomputed PNG / placeholder
+        # without triggering any computation.
+        last_applied_tag <- reactiveVal(NULL)
+
+        observeEvent(input$td_gsea_db, {
+            last_applied_tag(NULL)
+        }, ignoreInit = TRUE)
+
+        observeEvent(input$td_apply, {
+            last_applied_tag(input$td_gsea_db %||% "GO_BP")
+        })
+
         output$treedot_plot <- renderImage({
-            n_clicks  <- input$td_apply
+            td_gsea_db   <- input$td_gsea_db %||% "GO_BP"
+            applied_tag  <- last_applied_tag()   # NULL until Apply clicked for this DB
+            apply_active <- isTRUE(applied_tag == td_gsea_db)
 
-            # td_gsea_db is reactive (not isolated) — dropdown change auto-refreshes
-            td_gsea_db <- input$td_gsea_db %||% "GO_BP"
-            db_parts   <- strsplit(td_gsea_db, "_", fixed = TRUE)[[1]]
-            gsea_db    <- db_parts[1]
-            gsea_ont   <- if (length(db_parts) > 1) db_parts[2] else NA_character_
+            db_parts <- strsplit(td_gsea_db, "_", fixed = TRUE)[[1]]
+            gsea_db  <- db_parts[1]
+            gsea_ont <- if (length(db_parts) > 1) db_parts[2] else NA_character_
 
-            # Load precomputed RDS list (reactive — updates when results dir changes)
+            # Detect organism from the first available RDS
             rds_list  <- data()$treedot_rds
             first_cmp <- if (!is.null(rds_list) && length(rds_list) > 0) rds_list[[1]] else NULL
             call_str  <- tryCatch(paste(deparse(first_cmp@.call), collapse = " "),
@@ -529,7 +533,7 @@ mod_gsea_server <- function(id, app_data) {
             org_db_str <- if (grepl("org\\.Mm", call_str)) "org.Mm.eg.db" else "org.Hs.eg.db"
             kegg_org   <- if (org_db_str == "org.Mm.eg.db") "mmu" else "hsa"
 
-            # Visual params: only read when Apply is clicked (isolated)
+            # Visual params — only read when Apply was clicked for this database
             top_paths  <- isolate(input$td_top_paths)  %||% 5L
             clust_num  <- isolate(input$td_clust_num)  %||% 3L
             ora_type   <- isolate(input$td_ora_type)   %||% "GO"
@@ -538,18 +542,13 @@ mod_gsea_server <- function(id, app_data) {
             ora_max_gs <- isolate(input$td_ora_max_gs) %||% 500L
             ora_padj   <- isolate(input$td_ora_padj)   %||% 1.0
 
-            # 1. Try precomputed PNG for the selected database (no computation needed)
-            png_path <- get_treedot_png(RESULTS_DIR, td_gsea_db)
-            if (!is.null(png_path) && (is.null(n_clicks) || n_clicks == 0)) {
-                return(list(src = png_path, contentType = "image/png",
-                            style = "max-width:100%; height:auto;"))
-            }
-
-            # 2. Try precomputed RDS (render with current visual params)
-            cmp <- if (!is.null(rds_list) && !is.null(rds_list[[td_gsea_db]])) {
-                rds_list[[td_gsea_db]]
-            } else if (is.null(n_clicks) || n_clicks == 0) {
-                # No precomputed data and Apply not clicked → show placeholder
+            # 1. No Apply yet for this database → show precomputed PNG or placeholder
+            if (!apply_active) {
+                png_path <- get_treedot_png(RESULTS_DIR, td_gsea_db)
+                if (!is.null(png_path)) {
+                    return(list(src = png_path, contentType = "image/png",
+                                style = "max-width:100%; height:auto;"))
+                }
                 tmpfile <- tempfile(fileext = ".png")
                 p <- ggplot() +
                     annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
@@ -557,14 +556,18 @@ mod_gsea_server <- function(id, app_data) {
                              label = paste0(
                                  "No pre-rendered TreeDot found for ", td_gsea_db, ".\n\n",
                                  "Run the pipeline to generate it, or\n",
-                                 "click 'Apply Changes' to compute now\n",
-                                 "(requires GSEA results in the results directory).")) +
+                                 "click 'Apply Changes' to compute now.")) +
                     theme_void()
                 ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
                 return(list(src = tmpfile, contentType = "image/png",
                             style = "max-width:100%; height:auto;"))
+            }
+
+            # 2. Apply was clicked: resolve compareClusterResult
+            cmp <- if (!is.null(rds_list) && !is.null(rds_list[[td_gsea_db]])) {
+                rds_list[[td_gsea_db]]
             } else {
-                # 3. Apply clicked and no RDS → recompute from DGE
+                # No RDS → recompute from DGE data (~5 min)
                 dge_list <- isolate(data()$dge)
                 if (length(dge_list) < 2) {
                     tmpfile <- tempfile(fileext = ".png")

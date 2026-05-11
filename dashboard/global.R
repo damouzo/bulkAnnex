@@ -199,8 +199,21 @@ get_pathview_files <- function(results_dir, contrast) {
 get_treedot_png <- function(results_dir, tag = NULL) {
     td_dir <- file.path(results_dir, "gsea", "treedot")
     if (!is.null(tag)) {
-        f <- file.path(td_dir, paste0("gsea_treedot_", tag, ".png"))
-        return(if (file.exists(f)) f else NULL)
+        tag_upper <- toupper(tag)
+        candidates <- if (tag_upper == "KEGG") {
+            c("KEGG", "Kegg")
+        } else if (tag_upper == "REACTOME") {
+            c("Reactome", "reactome")
+        } else if (grepl("^GO_", tag_upper)) {
+            c(tag_upper)
+        } else {
+            c(tag)
+        }
+        for (cand in unique(candidates)) {
+            f <- file.path(td_dir, paste0("gsea_treedot_", cand, ".png"))
+            if (file.exists(f)) return(f)
+        }
+        return(NULL)
     }
     # No tag: try GO_BP first, then legacy generic file
     f <- file.path(td_dir, "gsea_treedot_GO_BP.png")
@@ -219,7 +232,17 @@ load_treedot_rds <- function(results_dir) {
     tagged   <- Sys.glob(file.path(td_dir, "gsea_treedot_*.rds"))
     out_list <- list()
     for (f in sort(tagged)) {
-        tag <- sub("^gsea_treedot_(.+)\\.rds$", "\\1", basename(f))
+        raw_tag <- sub("^gsea_treedot_(.+)\\.rds$", "\\1", basename(f))
+        tag_upper <- toupper(raw_tag)
+        tag <- if (tag_upper == "KEGG") {
+            "KEGG"
+        } else if (tag_upper == "REACTOME") {
+            "Reactome"
+        } else if (grepl("^GO_", tag_upper)) {
+            tag_upper
+        } else {
+            raw_tag
+        }
         cmp <- tryCatch(readRDS(f), error = function(e) {
             message("Warning: could not load ", basename(f), ": ", e$message)
             NULL
@@ -346,17 +369,17 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
         ggplot2::geom_point() +
         ggplot2::scale_y_discrete(position = "right") +
         ggplot2::scale_color_gradient2(low = "blue4", mid = "white", high = "red") +
-        cowplot::theme_cowplot(font_size = 14) +
+        cowplot::theme_cowplot(font_size = 15) +
         ggplot2::theme(axis.line   = ggplot2::element_blank(),
-                       axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
-                       axis.text.y = ggplot2::element_text(size = 12)) +
+                       axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1, size = 14),
+                       axis.text.y = ggplot2::element_text(size = 13)) +
         ggplot2::xlab("Contrast") + ggplot2::ylab("") +
         ggplot2::guides(size  = ggplot2::guide_legend(title = "-log10(p.adj)"),
                         color = ggplot2::guide_colorbar(title = "NES")) +
         ggplot2::theme(axis.ticks    = ggplot2::element_blank(),
                        legend.position  = "right", legend.justification = c(0, 0),
-                       legend.text      = ggplot2::element_text(size = 12),
-                       legend.title     = ggplot2::element_text(size = 13))
+                       legend.text      = ggplot2::element_text(size = 13),
+                       legend.title     = ggplot2::element_text(size = 14))
     dotplot_noleg <- dotplot_full + ggplot2::theme(legend.position = "none")
 
     leg_tree <- cowplot::get_legend(ggtree_full)

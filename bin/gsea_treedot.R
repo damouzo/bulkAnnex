@@ -101,60 +101,37 @@ for (i in seq_along(dge_files)) {
     }
 }
 
-# ---- compareCluster ---------------------------------------------------------
-message("Running compareCluster (database=", opt$database, ", go_ont=", opt$go_ont, ")...")
-set.seed(42)
-
-cmp <- tryCatch({
-    if (opt$database == "GO") {
-        compareCluster(
-            geneClusters = ranked_ensembl_list,
-            fun          = "gseGO",
-            OrgDb        = org_db,
-            keyType      = "ENSEMBL",
-            ont          = opt$go_ont,
-            pvalueCutoff = 1,
-            minGSSize    = opt$min_gs,
-            maxGSSize    = opt$max_gs,
-            eps          = 0,
-            seed         = TRUE,
-            verbose      = FALSE
-        )
-    } else {
-        valid_el <- ranked_entrez_list[lengths(ranked_entrez_list) > 0]
-        if (length(valid_el) < 2) stop("< 2 contrasts have Entrez IDs — cannot run KEGG TreeDot.")
-        compareCluster(
-            geneClusters = valid_el,
-            fun          = "gseKEGG",
-            organism     = kegg_org,
-            pvalueCutoff = 1,
-            minGSSize    = opt$min_gs,
-            maxGSSize    = opt$max_gs,
-            eps          = 0,
-            seed         = TRUE,
-            verbose      = FALSE
-        )
+# ---- Parse requested databases ----------------------------------------------
+# e.g. "GO:BP,KEGG,Reactome" -> list of list(type, ont, tag)
+parse_databases <- function(db_str) {
+    dbs <- trimws(strsplit(db_str, ",")[[1]])
+    dbs <- dbs[nzchar(dbs)]
+    if (length(dbs) == 0) {
+        stop("No valid entries in --databases.")
     }
-}, error = function(e) { message("compareCluster error: ", e$message); NULL })
 
-if (is.null(cmp) || nrow(as.data.frame(cmp)) == 0) {
-    message("No enriched terms found — skipping TreeDot plot.")
-    writeLines(c("GSEA_TREEDOT:", "    status: skipped (no enriched terms)"), "versions.yml")
-    quit(save = "no", status = 0)
+    lapply(dbs, function(db) {
+        if (grepl("^GO:", db, ignore.case = TRUE)) {
+            ont <- toupper(sub("^GO:", "", db))
+            if (!ont %in% c("BP", "MF", "CC")) {
+                stop("Unsupported GO ontology in --databases: ", db,
+                     ". Use GO:BP, GO:MF or GO:CC.")
+            }
+            list(type = "GO", ont = ont, tag = paste0("GO_", ont))
+        } else if (toupper(db) == "KEGG") {
+            list(type = "KEGG", ont = NA_character_, tag = "KEGG")
+        } else if (toupper(db) == "REACTOME") {
+            list(type = "Reactome", ont = NA_character_, tag = "Reactome")
+        } else {
+            stop("Unsupported database in --databases: ", db,
+                 ". Use GO:BP, GO:MF, GO:CC, KEGG or Reactome.")
+        }
+    })
 }
-message("compareCluster: ", nrow(as.data.frame(cmp)), " term-contrast associations found.")
 
-# ---- pairwise_termsim -------------------------------------------------------
-# Required for the dendrogram: fills the @termsim slot of the compareClusterResult.
-message("Computing pairwise term similarity...")
-cmp <- tryCatch(
-    pairwise_termsim(cmp),
-    error = function(e) { message("pairwise_termsim warning: ", e$message); cmp }
-)
-
-# Save RDS — dashboard reuses this to replot without re-running compareCluster
-saveRDS(cmp, "gsea_treedot.rds")
-message("Saved: gsea_treedot.rds")
+databases_to_run <- parse_databases(opt$databases)
+message("Databases requested: ",
+        paste(sapply(databases_to_run, `[[`, "tag"), collapse = ", "))
 
 # ---- TreeDot plot function --------------------------------------------------
 # Adapted from scPlot_treedot for bulk contrasts.
@@ -269,17 +246,17 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
         geom_point() +
         scale_y_discrete(position = "right") +
         scale_color_gradient2(low = "blue4", mid = "white", high = "red") +
-        theme_cowplot(font_size = 14) +
+        theme_cowplot(font_size = 15) +
         theme(axis.line   = element_blank(),
-              axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
-              axis.text.y = element_text(size = 12)) +
+              axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 14),
+              axis.text.y = element_text(size = 13)) +
         xlab("Contrast") + ylab("") +
         guides(size  = guide_legend(title = "-log10(p.adj)"),
                color = guide_colorbar(title = "NES")) +
         theme(axis.ticks    = element_blank(),
               legend.position  = "right", legend.justification = c(0, 0),
-              legend.text      = element_text(size = 12),
-              legend.title     = element_text(size = 13))
+              legend.text      = element_text(size = 13),
+              legend.title     = element_text(size = 14))
     dotplot_noleg <- dotplot_full + theme(legend.position = "none")
 
     # Assemble final plot: dendrogram | dot-heatmap | legends
@@ -291,6 +268,135 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
                           ncol = 1, rel_heights = c(1, -0.5, 1))
     plot_grid(row_main, leg_col, NULL,
               nrow = 1, rel_widths = c(1, 0.1, kw_maxlen * 0.006))
+}
+
+# ---- Per-database compareCluster + plot loop --------------------------------
+any_success <- FALSE
+
+for (db_entry in databases_to_run) {
+    db_type <- db_entry$type   # "GO", "KEGG", "Reactome"
+    db_ont  <- db_entry$ont    # "BP"/"MF"/"CC" or NA
+    db_tag  <- db_entry$tag    # "GO_BP", "KEGG", "Reactome"
+    message("\n--- Processing: ", db_tag, " ---")
+
+    gene_clusters <- if (db_type == "GO") {
+        ranked_ensembl_list
+    } else {
+        valid_el <- ranked_entrez_list[lengths(ranked_entrez_list) > 0]
+        if (length(valid_el) < 2) {
+            message("< 2 contrasts have Entrez IDs \u2014 skipping ", db_tag, ".")
+            next
+        }
+        valid_el
+    }
+
+    set.seed(42)
+    cmp <- tryCatch({
+        if (db_type == "GO") {
+            compareCluster(
+                geneClusters = gene_clusters,
+                fun          = "gseGO",
+                OrgDb        = org_db,
+                keyType      = "ENSEMBL",
+                ont          = db_ont,
+                pvalueCutoff = 1,
+                minGSSize    = opt$min_gs,
+                maxGSSize    = opt$max_gs,
+                eps          = 0,
+                seed         = TRUE,
+                verbose      = FALSE
+            )
+        } else if (db_type == "KEGG") {
+            compareCluster(
+                geneClusters = gene_clusters,
+                fun          = "gseKEGG",
+                organism     = kegg_org,
+                pvalueCutoff = 1,
+                minGSSize    = opt$min_gs,
+                maxGSSize    = opt$max_gs,
+                eps          = 0,
+                seed         = TRUE,
+                verbose      = FALSE
+            )
+        } else {
+            reactome_org <- if (opt$organism == "human") "human" else "mouse"
+            compareCluster(
+                geneClusters = gene_clusters,
+                fun          = "gsePathway",
+                organism     = reactome_org,
+                pvalueCutoff = 1,
+                minGSSize    = opt$min_gs,
+                maxGSSize    = opt$max_gs,
+                eps          = 0,
+                seed         = TRUE,
+                verbose      = FALSE
+            )
+        }
+    }, error = function(e) { message("compareCluster(", db_tag, "): ", e$message); NULL })
+
+    if (is.null(cmp) || nrow(as.data.frame(cmp)) == 0) {
+        message("No enriched terms for ", db_tag, " \u2014 skipping.")
+        next
+    }
+    message("compareCluster(", db_tag, "): ",
+            nrow(as.data.frame(cmp)), " term-contrast associations.")
+
+    cmp <- tryCatch(
+        pairwise_termsim(cmp),
+        error = function(e) { message("pairwise_termsim(", db_tag, "): ", e$message); cmp }
+    )
+
+    rds_file <- paste0("gsea_treedot_", db_tag, ".rds")
+    saveRDS(cmp, rds_file)
+    message("Saved: ", rds_file)
+    any_success <- TRUE
+
+    keytype_plot <- if (db_type == "GO") "ENSEMBL" else "ENTREZID"
+    fort_tmp <- tryCatch(
+        fortify(cmp, showCategory = opt$top_paths, includeAll = TRUE, split = NULL),
+        error = function(e) data.frame(Description = character(0), Cluster = character(0))
+    )
+    n_paths <- max(length(unique(fort_tmp$Description)), 1L)
+    plot_h  <- max(8, n_paths * 0.35 + 4)
+    plot_w  <- max(12, length(contrast_ids) * 1.2 + 6)
+
+    p <- tryCatch(
+        plot_treedot(
+            cmp        = cmp,
+            top_paths  = opt$top_paths,
+            clust_num  = opt$clust_num,
+            ora_type   = opt$ora_type,
+            ora_ont    = opt$ora_ont,
+            ora_min_gs = opt$ora_min_gs,
+            ora_max_gs = opt$ora_max_gs,
+            ora_padj   = opt$ora_padj,
+            org_db_str = org_db_str,
+            kegg_org   = kegg_org,
+            keytype    = keytype_plot
+        ),
+        error = function(e) { message("plot_treedot(", db_tag, "): ", e$message); NULL }
+    )
+
+    if (!is.null(p)) {
+        for (ext in c("pdf", "png")) {
+            f <- paste0("gsea_treedot_", db_tag, ".", ext)
+            if (ext == "png") png(f, width = plot_w * 100, height = plot_h * 100, res = 100)
+            else              pdf(f, width = plot_w, height = plot_h)
+            print(p)
+            dev.off()
+        }
+        message("Saved: gsea_treedot_", db_tag, ".png / gsea_treedot_", db_tag, ".pdf")
+    } else {
+        message("Plot failed for ", db_tag, " \u2014 RDS saved, replotable from the dashboard.")
+    }
+}
+
+if (!any_success) {
+    message("No databases produced enriched terms.")
+    writeLines(c("GSEA_TREEDOT:",
+                 "    status: skipped (no enriched terms in any database)"),
+               "versions.yml")
+    quit(save = "no", status = 0)
 }
 
 # ---- versions ---------------------------------------------------------------
