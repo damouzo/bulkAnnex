@@ -210,13 +210,24 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
         genes_i    <- unique(unlist(str_split(cluster_df$geneID, "/")))
         genes_i    <- genes_i[nzchar(genes_i) & !is.na(genes_i)]
 
+        # enrichKEGG requires ENTREZ IDs; convert if the main GSEA used ENSEMBL keys
+        genes_for_ora <- genes_i
+        if (ora_type == "KEGG" && keytype != "ENTREZID") {
+            genes_for_ora <- tryCatch(
+                na.omit(as.character(mapIds(get(org_db_str), keys = genes_i,
+                                           column = "ENTREZID", keytype = keytype,
+                                           multiVals = "first"))),
+                error = function(e) { message("ID conversion for KEGG ORA: ", e$message); character(0) }
+            )
+        }
+
         ora_res <- tryCatch({
             if (ora_type == "GO") {
-                enrichGO(gene = genes_i, OrgDb = org_db_str, keyType = keytype,
+                enrichGO(gene = genes_for_ora, OrgDb = org_db_str, keyType = keytype,
                          ont = ora_ont, pvalueCutoff = ora_padj, pAdjustMethod = "BH",
                          qvalueCutoff = 1, minGSSize = ora_min_gs, maxGSSize = ora_max_gs)
             } else {
-                enrichKEGG(gene = genes_i, organism = kegg_org,
+                enrichKEGG(gene = genes_for_ora, organism = kegg_org,
                            pvalueCutoff = ora_padj, pAdjustMethod = "BH",
                            qvalueCutoff = 1, minGSSize = ora_min_gs, maxGSSize = ora_max_gs)
             }
@@ -258,13 +269,17 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
         geom_point() +
         scale_y_discrete(position = "right") +
         scale_color_gradient2(low = "blue4", mid = "white", high = "red") +
-        theme_cowplot() +
+        theme_cowplot(font_size = 13) +
         theme(axis.line   = element_blank(),
-              axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
-        ylab("") +
-        guides(size = guide_legend(title = "-log10(p.adj)")) +
-        theme(axis.ticks = element_blank(),
-              legend.position = "right", legend.justification = c(0, 0))
+              axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12),
+              axis.text.y = element_text(size = 11)) +
+        xlab("Contrast") + ylab("") +
+        guides(size  = guide_legend(title = "-log10(p.adj)"),
+               color = guide_colorbar(title = "NES")) +
+        theme(axis.ticks    = element_blank(),
+              legend.position  = "right", legend.justification = c(0, 0),
+              legend.text      = element_text(size = 11),
+              legend.title     = element_text(size = 12))
     dotplot_noleg <- dotplot_full + theme(legend.position = "none")
 
     # Assemble final plot: dendrogram | dot-heatmap | legends
