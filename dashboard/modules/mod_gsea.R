@@ -557,7 +557,7 @@ mod_gsea_server <- function(id, app_data) {
             # Detect organism from the RDS call slot; default to human
             call_str   <- tryCatch(paste(deparse(cmp@.call), collapse = " "),
                                    error = function(e) "")
-            org_db_str <- if (grepl("org\.Mm", call_str)) "org.Mm.eg.db" else "org.Hs.eg.db"
+            org_db_str <- if (grepl("org\\.Mm", call_str)) "org.Mm.eg.db" else "org.Hs.eg.db"
             kegg_org   <- if (org_db_str == "org.Mm.eg.db") "mmu" else "hsa"
             keytype    <- tryCatch(
                 as.character(cmp@.call$keyType %||% "ENSEMBL"),
