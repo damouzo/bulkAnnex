@@ -96,10 +96,20 @@ mod_gsea_server <- function(id, app_data) {
                         column(3,
                             card(
                                 card_header("TreeDot Settings"),
+                                tags$h6("GSEA compareCluster"),
+                                selectInput(ns("td_gsea_db"), "GSEA database",
+                                            choices = c("GO" = "GO", "KEGG" = "KEGG"),
+                                            selected = "GO"),
+                                conditionalPanel(
+                                    condition = sprintf("input['%s'] == 'GO'", ns("td_gsea_db")),
+                                    selectInput(ns("td_gsea_go_ont"), "GO ontology",
+                                                choices = c("BP" = "BP", "MF" = "MF", "CC" = "CC"),
+                                                selected = "BP")
+                                ),
                                 tags$p(class = "text-muted small",
-                                       "Cross-contrast GSEA comparison. The default view shows",
-                                       "the pre-rendered pipeline plot. Click",
-                                       tags$em("Apply Changes"), "to recompute interactively."),
+                                       icon("circle-info"),
+                                       " GO uses the precomputed RDS (fast).",
+                                       " Switching to KEGG recomputes from DGE data (~5 min)."),
                                 numericInput(ns("td_top_paths"), "Top pathways / contrast",
                                              value = 5, min = 1, max = 20),
                                 numericInput(ns("td_clust_num"), "Dendrogram clusters",
@@ -123,11 +133,7 @@ mod_gsea_server <- function(id, app_data) {
                                              value = 1, min = 0, max = 1, step = 0.05),
                                 actionButton(ns("td_apply"), "Apply Changes",
                                              icon = icon("play"),
-                                             class = "btn-primary w-100 mt-2"),
-                                tags$p(class = "text-muted small mt-2",
-                                       icon("circle-info"),
-                                       " To change database or GO ontology, re-run the pipeline",
-                                       " with updated ", tags$code("treedot_*"), " params.")
+                                             class = "btn-primary w-100 mt-2")
                             )
                         ),
                         column(9,
@@ -502,8 +508,10 @@ mod_gsea_server <- function(id, app_data) {
         }, deleteFile = FALSE)
 
         # ---- TreeDot --------------------------------------------------------
-        # Default: serve the pre-rendered pipeline PNG instantly (no computation).
-        # After "Apply Changes": recompute using the saved compareClusterResult RDS.
+        # Default: serve the pre-rendered pipeline PNG (no computation).
+        # After "Apply Changes": resolve which compareClusterResult to use:
+        #   - If the requested GSEA database matches the stored RDS → reuse RDS (fast)
+        #   - Otherwise → recompute compareCluster from DGE data (~5 min)
         output$treedot_plot <- renderImage({
             n_clicks <- input$td_apply
 
@@ -529,42 +537,74 @@ mod_gsea_server <- function(id, app_data) {
                             style = "max-width:100%; height:auto;"))
             }
 
-            # User clicked Apply — recompute from RDS with current UI params
-            cmp <- isolate(data()$treedot_rds)
+            # --- Collect UI params -------------------------------------------
+            td_gsea_db     <- isolate(input$td_gsea_db)     %||% "GO"
+            td_gsea_go_ont <- isolate(input$td_gsea_go_ont) %||% "BP"
+            top_paths      <- isolate(input$td_top_paths)   %||% 5L
+            clust_num      <- isolate(input$td_clust_num)   %||% 3L
+            ora_type       <- isolate(input$td_ora_type)    %||% "GO"
+            ora_ont        <- isolate(input$td_ora_ont)     %||% "BP"
+            ora_min_gs     <- isolate(input$td_ora_min_gs)  %||% 10L
+            ora_max_gs     <- isolate(input$td_ora_max_gs)  %||% 500L
+            ora_padj       <- isolate(input$td_ora_padj)    %||% 1.0
+
+            # --- Detect organism from stored RDS or gsea_objects -------------
+            rds_cmp    <- isolate(data()$treedot_rds)
+            call_str   <- tryCatch(paste(deparse(rds_cmp@.call), collapse = " "),
+                                   error = function(e) "")
+            org_db_str <- if (grepl("org\\.Mm", call_str)) "org.Mm.eg.db" else "org.Hs.eg.db"
+            kegg_org   <- if (org_db_str == "org.Mm.eg.db") "mmu" else "hsa"
+
+            # --- Resolve compareClusterResult --------------------------------
+            rds_info <- get_rds_db_info(rds_cmp)
+            cmp_ok   <- !is.null(rds_cmp) &&
+                        rds_info$database == td_gsea_db &&
+                        (td_gsea_db == "KEGG" || isTRUE(rds_info$go_ont == td_gsea_go_ont))
+
+            cmp <- if (cmp_ok) {
+                rds_cmp
+            } else {
+                # Recompute from DGE results
+                dge_list <- isolate(data()$dge)
+                if (length(dge_list) < 2) {
+                    tmpfile <- tempfile(fileext = ".png")
+                    p <- ggplot() +
+                        annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
+                                 size = 3.5, colour = "grey50",
+                                 label = "Need >= 2 contrasts in DGE results\nto recompute the TreeDot.") +
+                        theme_void()
+                    ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
+                    return(list(src = tmpfile, contentType = "image/png",
+                                style = "max-width:100%; height:auto;"))
+                }
+                tryCatch(
+                    build_treedot_cmp(dge_list, org_db_str, kegg_org,
+                                      td_gsea_db, td_gsea_go_ont,
+                                      min_gs = 15L, max_gs = 500L),
+                    error = function(e) { message("build_treedot_cmp: ", e$message); NULL }
+                )
+            }
+
             if (is.null(cmp)) {
                 tmpfile <- tempfile(fileext = ".png")
                 p <- ggplot() +
                     annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
                              size = 3.5, colour = "grey50",
                              label = paste0(
-                                 "gsea_treedot.rds not found.\n\n",
-                                 "Re-run the pipeline with --run_gsea\n",
-                                 "and at least 2 contrasts to generate it.")) +
+                                 "compareCluster failed.\n\n",
+                                 "Check GSEA results are available\n",
+                                 "and internet is accessible (KEGG).")) +
                     theme_void()
                 ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
                 return(list(src = tmpfile, contentType = "image/png",
                             style = "max-width:100%; height:auto;"))
             }
 
-            top_paths  <- isolate(input$td_top_paths)  %||% 5L
-            clust_num  <- isolate(input$td_clust_num)  %||% 3L
-            ora_type   <- isolate(input$td_ora_type)   %||% "GO"
-            ora_ont    <- isolate(input$td_ora_ont)    %||% "BP"
-            ora_min_gs <- isolate(input$td_ora_min_gs) %||% 10L
-            ora_max_gs <- isolate(input$td_ora_max_gs) %||% 500L
-            ora_padj   <- isolate(input$td_ora_padj)   %||% 1.0
+            # --- Keytype: detect robustly from the (possibly fresh) cmp ------
+            cmp_info <- get_rds_db_info(cmp)
+            keytype  <- cmp_info$keytype
 
-            # Detect organism from the RDS call slot; default to human
-            call_str   <- tryCatch(paste(deparse(cmp@.call), collapse = " "),
-                                   error = function(e) "")
-            org_db_str <- if (grepl("org\\.Mm", call_str)) "org.Mm.eg.db" else "org.Hs.eg.db"
-            kegg_org   <- if (org_db_str == "org.Mm.eg.db") "mmu" else "hsa"
-            keytype    <- tryCatch(
-                as.character(cmp@.call$keyType %||% "ENSEMBL"),
-                error = function(e) "ENSEMBL"
-            )
-
-            # Dynamic canvas size based on data
+            # --- Dynamic canvas size -----------------------------------------
             fort_tmp    <- tryCatch(
                 fortify(cmp, showCategory = top_paths, includeAll = TRUE, split = NULL),
                 error = function(e) data.frame(Description = character(0), Cluster = character(0))

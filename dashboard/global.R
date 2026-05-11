@@ -14,6 +14,8 @@ suppressPackageStartupMessages({
     library(cowplot)
     library(clusterProfiler)
     library(RColorBrewer)
+    library(org.Hs.eg.db)
+    library(org.Mm.eg.db)
     # ggridges is used by enrichplot::ridgeplot() and loaded as its dependency.
     # The Ridgeplot tab falls back gracefully if it is unavailable.
 })
@@ -301,7 +303,8 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
     pal        <- c(RColorBrewer::brewer.pal(8, "Dark2"), RColorBrewer::brewer.pal(6, "Set1"))
 
     ggtree_full  <- p_tree +
-        ggplot2::scale_color_manual(values = pal, breaks = seq_len(clust_num), labels = keywords) +
+        ggplot2::scale_color_manual(name = "SubTree ORA",
+                                    values = pal, breaks = seq_len(clust_num), labels = keywords) +
         ggplot2::theme(legend.position = "right", legend.justification = c(0, 1.5))
     ggtree_noleg <- ggtree_full + ggplot2::theme(legend.position = "none")
 
@@ -319,17 +322,17 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
         ggplot2::geom_point() +
         ggplot2::scale_y_discrete(position = "right") +
         ggplot2::scale_color_gradient2(low = "blue4", mid = "white", high = "red") +
-        cowplot::theme_cowplot(font_size = 13) +
+        cowplot::theme_cowplot(font_size = 14) +
         ggplot2::theme(axis.line   = ggplot2::element_blank(),
-                       axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12),
-                       axis.text.y = ggplot2::element_text(size = 11)) +
+                       axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+                       axis.text.y = ggplot2::element_text(size = 12)) +
         ggplot2::xlab("Contrast") + ggplot2::ylab("") +
         ggplot2::guides(size  = ggplot2::guide_legend(title = "-log10(p.adj)"),
                         color = ggplot2::guide_colorbar(title = "NES")) +
         ggplot2::theme(axis.ticks    = ggplot2::element_blank(),
                        legend.position  = "right", legend.justification = c(0, 0),
-                       legend.text      = ggplot2::element_text(size = 11),
-                       legend.title     = ggplot2::element_text(size = 12))
+                       legend.text      = ggplot2::element_text(size = 12),
+                       legend.title     = ggplot2::element_text(size = 13))
     dotplot_noleg <- dotplot_full + ggplot2::theme(legend.position = "none")
 
     leg_tree <- cowplot::get_legend(ggtree_full)
@@ -340,4 +343,97 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
                                    ncol = 1, rel_heights = c(1, -0.5, 1))
     cowplot::plot_grid(row_main, leg_col, NULL,
                        nrow = 1, rel_widths = c(1, 0.1, kw_maxlen * 0.006))
+}
+
+# Helper: extract database info from a compareClusterResult object.
+# Returns list(database, go_ont, keytype) — used by the TreeDot server
+# to decide whether to reuse the stored RDS or recompute from DGE data.
+get_rds_db_info <- function(cmp) {
+    default <- list(database = "GO", go_ont = "BP", keytype = "ENSEMBL")
+    if (is.null(cmp)) return(default)
+    fun_name <- tryCatch(as.character(cmp@.call$fun), error = function(e) "gseGO")
+    if (grepl("KEGG", fun_name, ignore.case = TRUE))
+        return(list(database = "KEGG", go_ont = NA_character_, keytype = "ENTREZID"))
+    go_ont  <- tryCatch(as.character(cmp@.call$ont  %||% "BP"),     error = function(e) "BP")
+    keytype <- tryCatch(as.character(cmp@.call$keyType %||% "ENSEMBL"), error = function(e) "ENSEMBL")
+    list(database = "GO", go_ont = go_ont, keytype = keytype)
+}
+
+# Helper: rebuild a compareClusterResult from DGE data frames for interactive recompute.
+# dge_list   : named list of DGE data.frames (from data()$dge) with columns gene_id,
+#              log2FoldChange, pvalue
+# org_db_str : "org.Hs.eg.db" or "org.Mm.eg.db"
+# kegg_org   : "hsa" or "mmu"
+# database   : "GO" or "KEGG"
+# go_ont     : "BP", "MF", or "CC" (ignored for KEGG)
+build_treedot_cmp <- function(dge_list, org_db_str, kegg_org,
+                               database = "GO", go_ont = "BP",
+                               min_gs = 15L, max_gs = 500L) {
+    org_db <- get(org_db_str)
+    ranked_ens <- list()
+    ranked_ez  <- list()
+
+    for (nm in names(dge_list)) {
+        df <- dge_list[[nm]]
+        req_cols <- c("gene_id", "log2FoldChange", "pvalue")
+        if (!all(req_cols %in% colnames(df))) next
+        df <- df[!is.na(df$pvalue) & !is.na(df$log2FoldChange), ]
+        if (nrow(df) == 0) next
+        df$rank_metric <- sign(df$log2FoldChange) * (-log10(df$pvalue + .Machine$double.eps))
+
+        rl <- setNames(df$rank_metric, df$gene_id)
+        rl <- sort(rl, decreasing = TRUE)
+        ranked_ens[[nm]] <- rl[!duplicated(names(rl))]
+
+        ez <- tryCatch(
+            AnnotationDbi::mapIds(org_db, keys = df$gene_id, column = "ENTREZID",
+                                  keytype = "ENSEMBL", multiVals = "first"),
+            error = function(e) NULL
+        )
+        if (!is.null(ez)) {
+            df$entrez_id <- ez[df$gene_id]
+            df_ez <- df[!is.na(df$entrez_id), ]
+            if (nrow(df_ez) > 0) {
+                rl_ez <- setNames(df_ez$rank_metric, df_ez$entrez_id)
+                rl_ez <- sort(rl_ez, decreasing = TRUE)
+                ranked_ez[[nm]] <- rl_ez[!duplicated(names(rl_ez))]
+            }
+        }
+    }
+
+    if (database == "GO") {
+        if (length(ranked_ens) < 2) stop("Need >= 2 contrasts with valid ENSEMBL data.")
+    } else {
+        if (length(ranked_ez) < 2) stop("Need >= 2 contrasts with valid ENTREZ data for KEGG.")
+    }
+
+    set.seed(42)
+    cmp <- if (database == "GO") {
+        clusterProfiler::compareCluster(
+            geneClusters = ranked_ens,
+            fun          = "gseGO",
+            OrgDb        = org_db,
+            keyType      = "ENSEMBL",
+            ont          = go_ont,
+            pvalueCutoff = 1,
+            minGSSize    = min_gs,
+            maxGSSize    = max_gs,
+            eps          = 0,
+            seed         = TRUE,
+            verbose      = FALSE
+        )
+    } else {
+        clusterProfiler::compareCluster(
+            geneClusters = ranked_ez[lengths(ranked_ez) > 0],
+            fun          = "gseKEGG",
+            organism     = kegg_org,
+            pvalueCutoff = 1,
+            minGSSize    = min_gs,
+            maxGSSize    = max_gs,
+            eps          = 0,
+            seed         = TRUE,
+            verbose      = FALSE
+        )
+    }
+    tryCatch(enrichplot::pairwise_termsim(cmp), error = function(e) cmp)
 }
