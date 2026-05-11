@@ -89,21 +89,14 @@ mod_gsea_server <- function(id, app_data) {
                 ))
             }
 
-            # TreeDot is always appended as the last tab (database-agnostic)
+            # TreeDot is always appended as the last tab.
+            # Database is taken from the global Settings selector (input$database / input$go_ont).
             base_panels <- c(base_panels, list(
                 nav_panel("TreeDot",
                     fluidRow(
                         column(3,
                             card(
                                 card_header("TreeDot Settings"),
-                                tags$h6("GSEA compareCluster"),
-                                selectInput(ns("td_gsea_db"), "GSEA database",
-                                            choices = c("GO BP"      = "GO_BP",
-                                                        "GO MF"      = "GO_MF",
-                                                        "GO CC"      = "GO_CC",
-                                                        "KEGG"       = "KEGG",
-                                                        "Reactome"   = "Reactome"),
-                                            selected = "GO_BP"),
                                 numericInput(ns("td_top_paths"), "Top pathways / contrast",
                                              value = 5, min = 1, max = 20),
                                 numericInput(ns("td_clust_num"), "Dendrogram clusters",
@@ -502,28 +495,42 @@ mod_gsea_server <- function(id, app_data) {
         }, deleteFile = FALSE)
 
         # ---- TreeDot --------------------------------------------------------
-        # last_applied_tag: tracks which database tag was active when Apply was
-        # last clicked. Reset to NULL when the database dropdown changes, so that
-        # selecting a new database reverts to the precomputed PNG / placeholder
-        # without triggering any computation.
+        # td_gsea_db tag is derived from the global Settings selectors:
+        #   input$database ("go"/"kegg"/"reactome") + input$go_ont ("BP"/"MF"/"CC")
+        # Reset last_applied_tag whenever database or ontology changes so the
+        # precomputed PNG is shown first; computation only fires on Apply.
         last_applied_tag <- reactiveVal(NULL)
 
-        observeEvent(input$td_gsea_db, {
+        observeEvent(list(input$database, input$go_ont), {
             last_applied_tag(NULL)
         }, ignoreInit = TRUE)
 
         observeEvent(input$td_apply, {
-            last_applied_tag(input$td_gsea_db %||% "GO_BP")
+            db  <- input$database %||% "go"
+            ont <- input$go_ont   %||% "BP"
+            tag <- switch(db,
+                "go"       = paste0("GO_", toupper(ont)),
+                "kegg"     = "KEGG",
+                "reactome" = "Reactome",
+                "GO_BP"
+            )
+            last_applied_tag(tag)
         })
 
         output$treedot_plot <- renderImage({
-            td_gsea_db   <- input$td_gsea_db %||% "GO_BP"
-            applied_tag  <- last_applied_tag()   # NULL until Apply clicked for this DB
-            apply_active <- isTRUE(applied_tag == td_gsea_db)
+            db  <- input$database %||% "go"
+            ont <- input$go_ont   %||% "BP"
+            td_gsea_db <- switch(db,
+                "go"       = paste0("GO_", toupper(ont)),
+                "kegg"     = "KEGG",
+                "reactome" = "Reactome",
+                "GO_BP"
+            )
+            gsea_db  <- switch(db, "go" = "GO", "kegg" = "KEGG", "Reactome")
+            gsea_ont <- if (db == "go") toupper(ont) else NA_character_
 
-            db_parts <- strsplit(td_gsea_db, "_", fixed = TRUE)[[1]]
-            gsea_db  <- db_parts[1]
-            gsea_ont <- if (length(db_parts) > 1) db_parts[2] else NA_character_
+            applied_tag  <- last_applied_tag()
+            apply_active <- isTRUE(applied_tag == td_gsea_db)
 
             # Detect organism from the first available RDS
             rds_list  <- data()$treedot_rds
