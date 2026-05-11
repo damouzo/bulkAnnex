@@ -10,6 +10,10 @@ suppressPackageStartupMessages({
     library(plotly)
     library(DT)
     library(enrichplot)
+    library(ggtree)
+    library(cowplot)
+    library(clusterProfiler)
+    library(RColorBrewer)
     # ggridges is used by enrichplot::ridgeplot() and loaded as its dependency.
     # The Ridgeplot tab falls back gracefully if it is unavailable.
 })
@@ -147,7 +151,8 @@ load_all_data <- function(results_dir = RESULTS_DIR) {
         dge             = load_dge_results(results_dir),
         gsea            = load_gsea_csv(results_dir),
         gsea_objects    = load_gsea_objects(results_dir),
-        contrasts_meta  = load_contrasts_meta(results_dir)
+        contrasts_meta  = load_contrasts_meta(results_dir),
+        treedot_rds     = load_treedot_rds(results_dir)
     )
 }
 
@@ -185,4 +190,138 @@ get_pathview_files <- function(results_dir, contrast) {
                   sub("\\.png$", "", basename(files)))
     names(files) <- pw_ids
     files
+}
+
+# Helper: pre-rendered TreeDot PNG saved by the GSEA_TREEDOT pipeline process.
+get_treedot_png <- function(results_dir) {
+    f <- file.path(results_dir, "gsea", "treedot", "gsea_treedot.png")
+    if (file.exists(f)) f else NULL
+}
+
+# Helper: load the compareClusterResult RDS saved by the GSEA_TREEDOT process.
+# The RDS already has pairwise_termsim() applied, so the dashboard only needs
+# to re-run plot_treedot() with different visual parameters — no GSEA recompute.
+load_treedot_rds <- function(results_dir) {
+    f <- file.path(results_dir, "gsea", "treedot", "gsea_treedot.rds")
+    if (!file.exists(f)) return(NULL)
+    tryCatch(readRDS(f), error = function(e) {
+        message("Warning: could not load gsea_treedot.rds: ", e$message)
+        NULL
+    })
+}
+
+# plot_treedot — TreeDot plot from a compareClusterResult object.
+# Used both by bin/gsea_treedot.R (pipeline) and mod_gsea.R (dashboard interactive).
+# cmp      : compareClusterResult with pairwise_termsim() already applied
+# keytype  : gene ID type in core_enrichment ("ENSEMBL" for GO, "ENTREZID" for KEGG)
+plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
+                         ora_type = "GO", ora_ont = "BP",
+                         ora_min_gs = 10, ora_max_gs = 500, ora_padj = 1,
+                         org_db_str = "org.Hs.eg.db", kegg_org = "hsa",
+                         keytype = "ENSEMBL") {
+
+    fort <- fortify(cmp, showCategory = top_paths, includeAll = TRUE, split = NULL)
+    fort$Cluster <- sub("\n.*", "", fort$Cluster)
+    fort$geneID  <- fort$core_enrichment
+    if (nrow(fort) == 0) stop("No pathways after fortify.")
+
+    id_unique <- unique(fort$Description)
+    cl_unique <- unique(fort$Cluster)
+    mat <- matrix(0, nrow = length(id_unique), ncol = length(cl_unique),
+                  dimnames = list(id_unique, cl_unique))
+    for (i in seq_len(nrow(fort))) mat[fort$Description[i], fort$Cluster[i]] <- 1
+    id_mat <- as.data.frame(mat)
+
+    fill_termsim <- function(x, keep) {
+        ts <- x@termsim[keep, keep, drop = FALSE]
+        ts[is.na(ts)] <- 0
+        ts2 <- ts + t(ts)
+        diag(ts2) <- 1
+        ts2
+    }
+    ts2 <- tryCatch(
+        fill_termsim(cmp, rownames(id_mat)),
+        error = function(e) {
+            diag_m <- diag(nrow(id_mat))
+            rownames(diag_m) <- colnames(diag_m) <- rownames(id_mat)
+            diag_m
+        }
+    )
+    hc        <- stats::hclust(stats::as.dist(1 - ts2), method = "ward.D")
+    clust_num <- min(clust_num, nrow(id_mat))
+    clus      <- stats::cutree(hc, clust_num)
+
+    keywords <- character(clust_num)
+    for (i in seq_len(clust_num)) {
+        paths_i    <- names(clus[clus == i])
+        cluster_df <- fort[fort$Description %in% paths_i, ]
+        genes_i    <- unique(unlist(stringr::str_split(cluster_df$geneID, "/")))
+        genes_i    <- genes_i[nzchar(genes_i) & !is.na(genes_i)]
+
+        ora_res <- tryCatch({
+            if (ora_type == "GO") {
+                clusterProfiler::enrichGO(
+                    gene = genes_i, OrgDb = org_db_str, keyType = keytype,
+                    ont = ora_ont, pvalueCutoff = ora_padj, pAdjustMethod = "BH",
+                    qvalueCutoff = 1, minGSSize = ora_min_gs, maxGSSize = ora_max_gs)
+            } else {
+                clusterProfiler::enrichKEGG(
+                    gene = genes_i, organism = kegg_org,
+                    pvalueCutoff = ora_padj, pAdjustMethod = "BH",
+                    qvalueCutoff = 1, minGSSize = ora_min_gs, maxGSSize = ora_max_gs)
+            }
+        }, error = function(e) NULL)
+
+        keywords[i] <- if (!is.null(ora_res) && nrow(ora_res@result) > 0 &&
+                            !is.na(ora_res@result$Description[1]))
+            ora_res@result$Description[1]
+        else
+            paste0("Cluster ", i)
+    }
+
+    kw_maxlen <- max(nchar(keywords), 17)
+
+    g_split    <- split(names(clus), clus)
+    p_tree     <- ggtree::ggtree(hc, size = 1.2)
+    clades     <- sapply(g_split, function(n) ggtree::MRCA(p_tree, n))
+    p_tree     <- ggtree::groupClade(p_tree, clades, group_name = "SubTree_ORA") +
+        ggplot2::aes(color = SubTree_ORA)
+    pal        <- c(RColorBrewer::brewer.pal(8, "Dark2"), RColorBrewer::brewer.pal(6, "Set1"))
+
+    ggtree_full  <- p_tree +
+        ggplot2::scale_color_manual(values = pal, breaks = seq_len(clust_num), labels = keywords) +
+        ggplot2::theme(legend.position = "right", legend.justification = c(0, 1.5))
+    ggtree_noleg <- ggtree_full + ggplot2::theme(legend.position = "none")
+
+    fort$log_p.adjust <- -log10(fort$p.adjust)
+    fort$Description  <- factor(fort$Description, levels = hc$labels[hc$order])
+    cl_levels <- if (is.factor(cmp@compareClusterResult$Cluster))
+        sub("\n.*", "", levels(cmp@compareClusterResult$Cluster))
+    else
+        sub("\n.*", "", unique(as.character(cmp@compareClusterResult$Cluster)))
+    fort$Cluster <- factor(fort$Cluster, levels = cl_levels)
+
+    dotplot_full <- fort %>%
+        ggplot2::ggplot(ggplot2::aes(x = Cluster, y = Description,
+                                     color = NES, size = log_p.adjust)) +
+        ggplot2::geom_point() +
+        ggplot2::scale_y_discrete(position = "right") +
+        ggplot2::scale_color_gradient2(low = "blue4", mid = "white", high = "red") +
+        cowplot::theme_cowplot() +
+        ggplot2::theme(axis.line   = ggplot2::element_blank(),
+                       axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+        ggplot2::ylab("") +
+        ggplot2::guides(size = ggplot2::guide_legend(title = "-log10(p.adj)")) +
+        ggplot2::theme(axis.ticks = ggplot2::element_blank(),
+                       legend.position = "right", legend.justification = c(0, 0))
+    dotplot_noleg <- dotplot_full + ggplot2::theme(legend.position = "none")
+
+    leg_tree <- cowplot::get_legend(ggtree_full)
+    leg_dot  <- cowplot::get_legend(dotplot_full)
+    row_main <- cowplot::plot_grid(ggtree_noleg, NULL, dotplot_noleg,
+                                   nrow = 1, rel_widths = c(0.3, -0.05, 2), align = "h")
+    leg_col  <- cowplot::plot_grid(leg_dot, NULL, leg_tree,
+                                   ncol = 1, rel_heights = c(1, -0.5, 1))
+    cowplot::plot_grid(row_main, leg_col, NULL,
+                       nrow = 1, rel_widths = c(1, 0.1, kw_maxlen * 0.006))
 }

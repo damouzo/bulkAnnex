@@ -20,8 +20,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIF="${SCRIPT_DIR}/bulkannex_r_1.0.0.sif"
-IMAGE="docker://damouzo/bulkannex_r:1.0.0"
+SIF="${SCRIPT_DIR}/bulkannex_r_1.0.3.sif"
+IMAGE="docker://damouzo/bulkannex_r:1.0.3"
 
 # Use a scratch tmp dir — /tmp is too small for mksquashfs
 SCRATCH_TMP="/gpfs/scratch/${USER}/singularity_tmp"

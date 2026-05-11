@@ -2,7 +2,7 @@ FROM bioconductor/bioconductor_docker:RELEASE_3_20
 
 LABEL org.opencontainers.image.title="bulkannex_r"
 LABEL org.opencontainers.image.description="R/Bioconductor environment for bulkAnnex bulk RNA-seq downstream analysis pipeline"
-LABEL org.opencontainers.image.version="1.0.1"
+LABEL org.opencontainers.image.version="1.0.3"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # ---- System dependencies -----------------------------------------------------
@@ -32,6 +32,7 @@ RUN Rscript -e " \
             'org.Mm.eg.db', \
             'AnnotationDbi', \
             'pathview', \
+            'ggtree', \
             'edgeR' \
         ), \
         ask    = FALSE, \
@@ -51,6 +52,7 @@ RUN Rscript -e " \
             'pheatmap', \
             'RColorBrewer', \
             'viridis', \
+            'cowplot', \
             'patchwork', \
             'scales', \
             'forcats', \
@@ -77,7 +79,7 @@ RUN Rscript -e " \
 RUN Rscript -e " \
     required <- c('DESeq2', 'GenomeInfoDbData', 'clusterProfiler', 'ReactomePA', 'fgsea', \
               'org.Hs.eg.db', 'org.Mm.eg.db', 'ashr', \
-              'ggridges', 'shiny', 'pathview'); \
+              'ggridges', 'shiny', 'pathview', 'ggtree', 'cowplot'); \
     missing  <- required[!sapply(required, requireNamespace, quietly = TRUE)]; \
     if (length(missing) > 0) stop('Missing required packages: ', paste(missing, collapse=', ')); \
     message('All required packages present.') \

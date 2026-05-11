@@ -89,6 +89,56 @@ mod_gsea_server <- function(id, app_data) {
                 ))
             }
 
+            # TreeDot is always appended as the last tab (database-agnostic)
+            base_panels <- c(base_panels, list(
+                nav_panel("TreeDot",
+                    fluidRow(
+                        column(3,
+                            card(
+                                card_header("TreeDot Settings"),
+                                tags$p(class = "text-muted small",
+                                       "Cross-contrast GSEA comparison. The default view shows",
+                                       "the pre-rendered pipeline plot. Click",
+                                       tags$em("Apply Changes"), "to recompute interactively."),
+                                numericInput(ns("td_top_paths"), "Top pathways / contrast",
+                                             value = 5, min = 1, max = 20),
+                                numericInput(ns("td_clust_num"), "Dendrogram clusters",
+                                             value = 3, min = 2, max = 10),
+                                tags$hr(),
+                                tags$h6("ORA branch labels"),
+                                selectInput(ns("td_ora_type"), "ORA database",
+                                            choices = c("GO" = "GO", "KEGG" = "KEGG"),
+                                            selected = "GO"),
+                                conditionalPanel(
+                                    condition = sprintf("input['%s'] == 'GO'", ns("td_ora_type")),
+                                    selectInput(ns("td_ora_ont"), "ORA GO ontology",
+                                                choices = c("BP" = "BP", "MF" = "MF", "CC" = "CC"),
+                                                selected = "BP")
+                                ),
+                                numericInput(ns("td_ora_min_gs"), "ORA min GS size",
+                                             value = 10, min = 5, max = 200),
+                                numericInput(ns("td_ora_max_gs"), "ORA max GS size",
+                                             value = 500, min = 100, max = 2000),
+                                numericInput(ns("td_ora_padj"), "ORA adj.p cutoff",
+                                             value = 1, min = 0, max = 1, step = 0.05),
+                                actionButton(ns("td_apply"), "Apply Changes",
+                                             icon = icon("play"),
+                                             class = "btn-primary w-100 mt-2"),
+                                tags$p(class = "text-muted small mt-2",
+                                       icon("circle-info"),
+                                       " To change database or GO ontology, re-run the pipeline",
+                                       " with updated ", tags$code("treedot_*"), " params.")
+                            )
+                        ),
+                        column(9,
+                            shinycssloaders::withSpinner(
+                                imageOutput(ns("treedot_plot"), width = "100%", height = "auto")
+                            )
+                        )
+                    )
+                )
+            ))
+
             do.call(navset_card_tab, base_panels)
         })
 
@@ -448,6 +498,105 @@ mod_gsea_server <- function(id, app_data) {
                             style = "max-width:100%; height:auto;"))
             }
             list(src = f, contentType = "image/png",
+                 style = "max-width:100%; height:auto;")
+        }, deleteFile = FALSE)
+
+        # ---- TreeDot --------------------------------------------------------
+        # Default: serve the pre-rendered pipeline PNG instantly (no computation).
+        # After "Apply Changes": recompute using the saved compareClusterResult RDS.
+        output$treedot_plot <- renderImage({
+            n_clicks <- input$td_apply
+
+            # No click yet — serve the static pre-rendered PNG from the pipeline
+            if (is.null(n_clicks) || n_clicks == 0) {
+                png_path <- get_treedot_png(RESULTS_DIR)
+                if (!is.null(png_path)) {
+                    return(list(src = png_path, contentType = "image/png",
+                                style = "max-width:100%; height:auto;"))
+                }
+                tmpfile <- tempfile(fileext = ".png")
+                p <- ggplot() +
+                    annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
+                             size = 4, colour = "grey50",
+                             label = paste0(
+                                 "No pre-rendered TreeDot found.\n\n",
+                                 "Run the pipeline to generate it, or\n",
+                                 "click 'Apply Changes' to compute now\n",
+                                 "(requires GSEA results in the results directory).")) +
+                    theme_void()
+                ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
+                return(list(src = tmpfile, contentType = "image/png",
+                            style = "max-width:100%; height:auto;"))
+            }
+
+            # User clicked Apply — recompute from RDS with current UI params
+            cmp <- isolate(data()$treedot_rds)
+            if (is.null(cmp)) {
+                tmpfile <- tempfile(fileext = ".png")
+                p <- ggplot() +
+                    annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
+                             size = 3.5, colour = "grey50",
+                             label = paste0(
+                                 "gsea_treedot.rds not found.\n\n",
+                                 "Re-run the pipeline with --run_gsea\n",
+                                 "and at least 2 contrasts to generate it.")) +
+                    theme_void()
+                ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
+                return(list(src = tmpfile, contentType = "image/png",
+                            style = "max-width:100%; height:auto;"))
+            }
+
+            top_paths  <- isolate(input$td_top_paths)  %||% 5L
+            clust_num  <- isolate(input$td_clust_num)  %||% 3L
+            ora_type   <- isolate(input$td_ora_type)   %||% "GO"
+            ora_ont    <- isolate(input$td_ora_ont)    %||% "BP"
+            ora_min_gs <- isolate(input$td_ora_min_gs) %||% 10L
+            ora_max_gs <- isolate(input$td_ora_max_gs) %||% 500L
+            ora_padj   <- isolate(input$td_ora_padj)   %||% 1.0
+
+            # Detect organism from the RDS call slot; default to human
+            call_str   <- tryCatch(paste(deparse(cmp@.call), collapse = " "),
+                                   error = function(e) "")
+            org_db_str <- if (grepl("org\.Mm", call_str)) "org.Mm.eg.db" else "org.Hs.eg.db"
+            kegg_org   <- if (org_db_str == "org.Mm.eg.db") "mmu" else "hsa"
+            keytype    <- tryCatch(
+                as.character(cmp@.call$keyType %||% "ENSEMBL"),
+                error = function(e) "ENSEMBL"
+            )
+
+            # Dynamic canvas size based on data
+            fort_tmp    <- tryCatch(
+                fortify(cmp, showCategory = top_paths, includeAll = TRUE, split = NULL),
+                error = function(e) data.frame(Description = character(0), Cluster = character(0))
+            )
+            n_paths     <- max(length(unique(fort_tmp$Description)), 1L)
+            n_contrasts <- max(length(unique(sub("\n.*", "", fort_tmp$Cluster))), 1L)
+            plot_h      <- max(8, n_paths * 0.35 + 4)
+            plot_w      <- max(12, n_contrasts * 1.2 + 6)
+
+            tmpfile <- tempfile(fileext = ".png")
+            p <- tryCatch(
+                plot_treedot(cmp        = cmp,
+                             top_paths  = top_paths,
+                             clust_num  = clust_num,
+                             ora_type   = ora_type,
+                             ora_ont    = ora_ont,
+                             ora_min_gs = ora_min_gs,
+                             ora_max_gs = ora_max_gs,
+                             ora_padj   = ora_padj,
+                             org_db_str = org_db_str,
+                             kegg_org   = kegg_org,
+                             keytype    = keytype),
+                error = function(e) {
+                    ggplot() +
+                        annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
+                                 size = 4, colour = "grey40",
+                                 label = paste("TreeDot error:", e$message)) +
+                        theme_void()
+                }
+            )
+            ggplot2::ggsave(tmpfile, p, width = plot_w, height = plot_h, dpi = 100, bg = "white")
+            list(src = tmpfile, contentType = "image/png",
                  style = "max-width:100%; height:auto;")
         }, deleteFile = FALSE)
     })

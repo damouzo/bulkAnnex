@@ -13,8 +13,8 @@ process SINGULARITY_PULL {
     task.ext.when == null || task.ext.when
 
     script:
-    def sif   = "${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.2.sif"
-    def image = "docker://damouzo/bulkannex_r:1.0.2"
+    def sif   = "${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.3.sif"
+    def image = "docker://damouzo/bulkannex_r:1.0.3"
     // Use a job-unique scratch dir for mksquashfs temporary files.
     // SLURM_JOB_ID is set in every SLURM job; fall back to PID for local runs.
     def tmpbase = "/gpfs/scratch/\${USER:-tmp}/singularity_tmp"

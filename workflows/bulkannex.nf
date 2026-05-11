@@ -12,6 +12,7 @@ include { SHINY_DASHBOARD       } from '../modules/local/shiny_dashboard/main'
 include { SINGULARITY_PULL      } from '../modules/local/singularity_pull/main'
 include { QC                    } from '../subworkflows/local/qc/main'
 include { DGE_GSEA              } from '../subworkflows/local/dge_gsea/main'
+include { GSEA_TREEDOT          } from '../modules/local/gsea_treedot/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -31,7 +32,7 @@ workflow BULKANNEX {
     // SINGULARITY_PULL runs natively (no container) on SLURM so that mksquashfs
     // has real RAM. It skips immediately if the SIF already exists.
     // Evaluated at parse time: if SIF is present from the start, skip entirely.
-    def sif_path = "${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.2.sif"
+    def sif_path = "${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.3.sif"
     ch_container_ready = Channel.value(true)  // default: SIF exists, proceed immediately
 
     if (workflow.containerEngine == 'singularity' && !new File(sif_path).exists()) {
@@ -118,6 +119,18 @@ workflow BULKANNEX {
         params.run_gsea
     )
     ch_versions = ch_versions.mix(DGE_GSEA.out.versions)
+
+    // ---- 5b. TreeDot: cross-contrast GSEA comparison -------------------------
+    // Collects all DGE CSVs into a single task that runs compareCluster + dendrogram.
+    // Skipped automatically by gsea_treedot.R if < 2 contrasts are present.
+    if (params.run_gsea && !params.skip_treedot) {
+        GSEA_TREEDOT(
+            DGE_GSEA.out.dge_results
+                .map { _meta, csv -> csv }
+                .collect()
+        )
+        ch_versions = ch_versions.mix(GSEA_TREEDOT.out.versions)
+    }
 
     // ---- 6. Shiny dashboard -------------------------------------------------
     // The dashboard reads results at runtime from outdir/ via BULKANNEX_RESULTS_DIR.
