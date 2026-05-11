@@ -195,21 +195,45 @@ get_pathview_files <- function(results_dir, contrast) {
 }
 
 # Helper: pre-rendered TreeDot PNG saved by the GSEA_TREEDOT pipeline process.
-get_treedot_png <- function(results_dir) {
-    f <- file.path(results_dir, "gsea", "treedot", "gsea_treedot.png")
-    if (file.exists(f)) f else NULL
+# tag: e.g. "GO_BP", "KEGG", "Reactome". If NULL, tries GO_BP then legacy file.
+get_treedot_png <- function(results_dir, tag = NULL) {
+    td_dir <- file.path(results_dir, "gsea", "treedot")
+    if (!is.null(tag)) {
+        f <- file.path(td_dir, paste0("gsea_treedot_", tag, ".png"))
+        return(if (file.exists(f)) f else NULL)
+    }
+    # No tag: try GO_BP first, then legacy generic file
+    f <- file.path(td_dir, "gsea_treedot_GO_BP.png")
+    if (file.exists(f)) return(f)
+    f <- file.path(td_dir, "gsea_treedot.png")
+    if (file.exists(f)) return(f)
+    NULL
 }
 
-# Helper: load the compareClusterResult RDS saved by the GSEA_TREEDOT process.
-# The RDS already has pairwise_termsim() applied, so the dashboard only needs
-# to re-run plot_treedot() with different visual parameters — no GSEA recompute.
+# Helper: load all compareClusterResult RDS files saved by GSEA_TREEDOT.
+# Returns a named list, e.g. list(GO_BP = <cmp>, KEGG = <cmp>, Reactome = <cmp>).
+# Backward-compatible: if only the legacy gsea_treedot.rds exists, returns
+# list(GO_BP = <cmp>) so the dashboard still finds it under the GO_BP key.
 load_treedot_rds <- function(results_dir) {
-    f <- file.path(results_dir, "gsea", "treedot", "gsea_treedot.rds")
-    if (!file.exists(f)) return(NULL)
-    tryCatch(readRDS(f), error = function(e) {
-        message("Warning: could not load gsea_treedot.rds: ", e$message)
-        NULL
-    })
+    td_dir   <- file.path(results_dir, "gsea", "treedot")
+    tagged   <- Sys.glob(file.path(td_dir, "gsea_treedot_*.rds"))
+    out_list <- list()
+    for (f in sort(tagged)) {
+        tag <- sub("^gsea_treedot_(.+)\\.rds$", "\\1", basename(f))
+        cmp <- tryCatch(readRDS(f), error = function(e) {
+            message("Warning: could not load ", basename(f), ": ", e$message)
+            NULL
+        })
+        if (!is.null(cmp)) out_list[[tag]] <- cmp
+    }
+    if (length(out_list) > 0) return(out_list)
+    # Backward compat: legacy single-file results
+    legacy <- file.path(td_dir, "gsea_treedot.rds")
+    if (file.exists(legacy)) {
+        cmp <- tryCatch(readRDS(legacy), error = function(e) NULL)
+        if (!is.null(cmp)) return(list(GO_BP = cmp))
+    }
+    NULL
 }
 
 # plot_treedot — TreeDot plot from a compareClusterResult object.
@@ -352,6 +376,8 @@ get_rds_db_info <- function(cmp) {
     default <- list(database = "GO", go_ont = "BP", keytype = "ENSEMBL")
     if (is.null(cmp)) return(default)
     fun_name <- tryCatch(as.character(cmp@.call$fun), error = function(e) "gseGO")
+    if (grepl("Pathway|Reactome", fun_name, ignore.case = TRUE))
+        return(list(database = "Reactome", go_ont = NA_character_, keytype = "ENTREZID"))
     if (grepl("KEGG", fun_name, ignore.case = TRUE))
         return(list(database = "KEGG", go_ont = NA_character_, keytype = "ENTREZID"))
     go_ont  <- tryCatch(as.character(cmp@.call$ont  %||% "BP"),     error = function(e) "BP")
@@ -422,11 +448,24 @@ build_treedot_cmp <- function(dge_list, org_db_str, kegg_org,
             seed         = TRUE,
             verbose      = FALSE
         )
-    } else {
+    } else if (database == "KEGG") {
         clusterProfiler::compareCluster(
             geneClusters = ranked_ez[lengths(ranked_ez) > 0],
             fun          = "gseKEGG",
             organism     = kegg_org,
+            pvalueCutoff = 1,
+            minGSSize    = min_gs,
+            maxGSSize    = max_gs,
+            eps          = 0,
+            seed         = TRUE,
+            verbose      = FALSE
+        )
+    } else {
+        reactome_org <- if (grepl("Mm", org_db_str)) "mouse" else "human"
+        clusterProfiler::compareCluster(
+            geneClusters = ranked_ez[lengths(ranked_ez) > 0],
+            fun          = "gsePathway",
+            organism     = reactome_org,
             pvalueCutoff = 1,
             minGSSize    = min_gs,
             maxGSSize    = max_gs,

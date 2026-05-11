@@ -12,9 +12,9 @@ process GSEA_TREEDOT {
     path dge_files   // all *_DESeq2_results.csv collected from all contrasts
 
     output:
-    path "gsea_treedot.{pdf,png}", optional: true, emit: plots
-    path "gsea_treedot.rds",       optional: true, emit: rds
-    path 'versions.yml',           emit: versions
+    path "gsea_treedot_*.{pdf,png}", optional: true, emit: plots
+    path "gsea_treedot_*.rds",       optional: true, emit: rds
+    path 'versions.yml',              emit: versions
 
     when:
     task.ext.when == null || task.ext.when

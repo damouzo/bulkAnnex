@@ -9,6 +9,7 @@ suppressPackageStartupMessages({
     library(dplyr)
     library(stringr)
     library(clusterProfiler)
+    library(ReactomePA)
     library(enrichplot)
     library(AnnotationDbi)
     library(ggtree)
@@ -19,10 +20,8 @@ suppressPackageStartupMessages({
 option_list <- list(
     make_option("--organism",   type = "character", default = "human",
                 help = "Organism: human or mouse [default: %default]"),
-    make_option("--database",   type = "character", default = "GO",
-                help = "GSEA database: GO or KEGG [default: %default]"),
-    make_option("--go_ont",     type = "character", default = "BP",
-                help = "GO ontology: BP, MF, or CC [default: %default]"),
+    make_option("--databases",  type = "character", default = "GO:BP,KEGG,Reactome",
+                help = "Comma-separated databases: GO:BP, GO:MF, GO:CC, KEGG, Reactome [default: %default]"),
     make_option("--top_paths",  type = "integer",   default = 5L,
                 help = "Top N pathways per contrast shown in the plot [default: %default]"),
     make_option("--clust_num",  type = "integer",   default = 3L,
@@ -251,7 +250,8 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
     pal         <- c(brewer.pal(8, "Dark2"), brewer.pal(6, "Set1"))
 
     ggtree_full  <- p_tree +
-        scale_color_manual(values = pal, breaks = seq_len(clust_num), labels = keywords) +
+        scale_color_manual(name = "SubTree ORA",
+                           values = pal, breaks = seq_len(clust_num), labels = keywords) +
         theme(legend.position = "right", legend.justification = c(0, 1.5))
     ggtree_noleg <- ggtree_full + theme(legend.position = "none")
 
@@ -269,17 +269,17 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
         geom_point() +
         scale_y_discrete(position = "right") +
         scale_color_gradient2(low = "blue4", mid = "white", high = "red") +
-        theme_cowplot(font_size = 13) +
+        theme_cowplot(font_size = 14) +
         theme(axis.line   = element_blank(),
-              axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12),
-              axis.text.y = element_text(size = 11)) +
+              axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+              axis.text.y = element_text(size = 12)) +
         xlab("Contrast") + ylab("") +
         guides(size  = guide_legend(title = "-log10(p.adj)"),
                color = guide_colorbar(title = "NES")) +
         theme(axis.ticks    = element_blank(),
               legend.position  = "right", legend.justification = c(0, 0),
-              legend.text      = element_text(size = 11),
-              legend.title     = element_text(size = 12))
+              legend.text      = element_text(size = 12),
+              legend.title     = element_text(size = 13))
     dotplot_noleg <- dotplot_full + theme(legend.position = "none")
 
     # Assemble final plot: dendrogram | dot-heatmap | legends
@@ -293,49 +293,9 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
               nrow = 1, rel_widths = c(1, 0.1, kw_maxlen * 0.006))
 }
 
-# ---- Generate and save the plot ---------------------------------------------
-message("Generating TreeDot plot...")
-keytype_ora <- if (opt$database == "GO") "ENSEMBL" else "ENTREZID"
-
-# Compute canvas dimensions based on number of unique pathways × contrasts
-fort_tmp    <- fortify(cmp, showCategory = opt$top_paths, includeAll = TRUE, split = NULL)
-n_paths     <- length(unique(fort_tmp$Description))
-plot_h      <- max(8, n_paths * 0.35 + 4)
-plot_w      <- max(12, length(contrast_ids) * 1.2 + 6)
-
-p <- tryCatch(
-    plot_treedot(
-        cmp        = cmp,
-        top_paths  = opt$top_paths,
-        clust_num  = opt$clust_num,
-        ora_type   = opt$ora_type,
-        ora_ont    = opt$ora_ont,
-        ora_min_gs = opt$ora_min_gs,
-        ora_max_gs = opt$ora_max_gs,
-        ora_padj   = opt$ora_padj,
-        org_db_str = org_db_str,
-        kegg_org   = kegg_org,
-        keytype    = keytype_ora
-    ),
-    error = function(e) { message("plot_treedot error: ", e$message); NULL }
-)
-
-if (!is.null(p)) {
-    for (ext in c("pdf", "png")) {
-        f <- paste0("gsea_treedot.", ext)
-        if (ext == "png") png(f, width = plot_w * 100, height = plot_h * 100, res = 100)
-        else              pdf(f, width = plot_w, height = plot_h)
-        print(p)
-        dev.off()
-    }
-    message("Saved: gsea_treedot.png / gsea_treedot.pdf")
-} else {
-    message("Plot generation failed — RDS was saved and can be replotted from the dashboard.")
-}
-
 # ---- versions ---------------------------------------------------------------
 ver      <- sessionInfo()
-pkg_list <- c("clusterProfiler", "enrichplot", "ggtree", "cowplot",
+pkg_list <- c("clusterProfiler", "ReactomePA", "enrichplot", "ggtree", "cowplot",
               "RColorBrewer", "org.Hs.eg.db", "org.Mm.eg.db", "AnnotationDbi",
               "ggplot2", "dplyr")
 ver_lines <- c("GSEA_TREEDOT:", paste0("    R: ", ver$R.version$version.string))
