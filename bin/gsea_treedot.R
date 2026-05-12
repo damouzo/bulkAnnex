@@ -27,7 +27,7 @@ option_list <- list(
     make_option("--clust_num",  type = "integer",   default = 3L,
                 help = "Number of dendrogram clusters [default: %default]"),
     make_option("--ora_type",   type = "character", default = "GO",
-                help = "ORA database for branch labels: GO or KEGG [default: %default]"),
+                help = "ORA database for branch labels: GO, KEGG or Reactome [default: %default]"),
     make_option("--ora_ont",    type = "character", default = "BP",
                 help = "ORA GO ontology [default: %default]"),
     make_option("--ora_min_gs", type = "integer",   default = 10L,
@@ -186,26 +186,32 @@ plot_treedot <- function(cmp, top_paths = 5, clust_num = 3,
         genes_i    <- unique(unlist(str_split(cluster_df$geneID, "/")))
         genes_i    <- genes_i[nzchar(genes_i) & !is.na(genes_i)]
 
-        # enrichKEGG requires ENTREZ IDs; convert if the main GSEA used ENSEMBL keys
+        # KEGG and Reactome ORA require ENTREZ IDs; convert if GSEA used ENSEMBL keys
         genes_for_ora <- genes_i
-        if (ora_type == "KEGG" && keytype != "ENTREZID") {
+        if (ora_type %in% c("KEGG", "Reactome") && keytype != "ENTREZID") {
             genes_for_ora <- tryCatch(
                 na.omit(as.character(mapIds(get(org_db_str), keys = genes_i,
                                            column = "ENTREZID", keytype = keytype,
                                            multiVals = "first"))),
-                error = function(e) { message("ID conversion for KEGG ORA: ", e$message); character(0) }
+                error = function(e) { message("ID conversion for ", ora_type, " ORA: ", e$message); character(0) }
             )
         }
 
+        reactome_org_ora <- if (grepl("Mm", org_db_str)) "mouse" else "human"
         ora_res <- tryCatch({
             if (ora_type == "GO") {
                 enrichGO(gene = genes_for_ora, OrgDb = org_db_str, keyType = keytype,
                          ont = ora_ont, pvalueCutoff = ora_padj, pAdjustMethod = "BH",
                          qvalueCutoff = 1, minGSSize = ora_min_gs, maxGSSize = ora_max_gs)
-            } else {
+            } else if (ora_type == "KEGG") {
                 enrichKEGG(gene = genes_for_ora, organism = kegg_org,
                            pvalueCutoff = ora_padj, pAdjustMethod = "BH",
                            qvalueCutoff = 1, minGSSize = ora_min_gs, maxGSSize = ora_max_gs)
+            } else {
+                ReactomePA::enrichPathway(
+                    gene = genes_for_ora, organism = reactome_org_ora,
+                    pvalueCutoff = ora_padj, pAdjustMethod = "BH",
+                    qvalueCutoff = 1, minGSSize = ora_min_gs, maxGSSize = ora_max_gs)
             }
         }, error = function(e) { message("ORA cluster ", i, ": ", e$message); NULL })
 

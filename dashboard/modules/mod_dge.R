@@ -79,10 +79,22 @@ mod_dge_server <- function(id, app_data) {
             df <- current_dge()
             if (nrow(df) == 0) return(plot_ly() %>% layout(title = "No data"))
 
-            # Top N labels
-            n_lab   <- min(p$n_label, nrow(df))
-            top_ids <- df %>% filter(direction != "NS") %>%
-                arrange(padj) %>% head(n_lab) %>% pull(gene_id)
+            # Top N labels — ranked by combined extremity score:
+            # normalised |log2FC| + normalised -log10(padj), equal-weighting both axes
+            # regardless of their scale difference. Genes at extremes of either axis
+            # get labeled first.
+            n_lab  <- min(p$n_label, nrow(df))
+            sig_df <- df %>% filter(direction != "NS")
+            top_ids <- if (nrow(sig_df) > 0 && n_lab > 0) {
+                max_lfc <- max(abs(sig_df$log2FoldChange), na.rm = TRUE)
+                max_nlp <- max(-log10(sig_df$padj + .Machine$double.eps), na.rm = TRUE)
+                sig_df %>%
+                    mutate(score = abs(log2FoldChange) / pmax(max_lfc, 1e-9) +
+                                   (-log10(padj + .Machine$double.eps)) / pmax(max_nlp, 1e-9)) %>%
+                    arrange(desc(score)) %>%
+                    head(n_lab) %>%
+                    pull(gene_id)
+            } else character(0)
             df$label <- ifelse(df$gene_id %in% top_ids, df$gene_name, "")
 
             dir_col <- c("Up" = "#d73027", "Down" = "#4575b4", "NS" = "#bbbbbb")
@@ -98,13 +110,16 @@ mod_dge_server <- function(id, app_data) {
                     hoverinfo   = "text",
                     type        = "scatter",
                     mode        = "markers",
+                    cliponaxis  = FALSE,
                     marker      = list(size = 4, opacity = 0.7)) %>%
                 add_text(text = ~label, textposition = "top center",
-                         textfont = list(size = p$label_size), showlegend = FALSE) %>%
+                         textfont = list(size = p$label_size), showlegend = FALSE,
+                         cliponaxis = FALSE) %>%
                 layout(
-                    xaxis = list(title = "Shrunken log2 fold change"),
-                    yaxis = list(title = "-log10(padj)"),
-                    title = paste0("Volcano: ", p$contrast),
+                    xaxis  = list(title = "Shrunken log2 fold change"),
+                    yaxis  = list(title = "-log10(padj)"),
+                    title  = paste0("Volcano: ", p$contrast),
+                    margin = list(t = 60),
                     shapes = list(
                         list(type = "line", x0 = p$lfc_cut, x1 = p$lfc_cut,
                              y0 = 0, y1 = 1, yref = "paper",
@@ -116,7 +131,14 @@ mod_dge_server <- function(id, app_data) {
                              y0 = -log10(p$padj_cut), y1 = -log10(p$padj_cut),
                              line = list(color = "grey", dash = "dash"))
                     )
-                )
+                ) %>%
+                config(toImageButtonOptions = list(
+                    format   = "png",
+                    filename = p$contrast,
+                    width    = 700,
+                    height   = 700,
+                    scale    = 2
+                ))
         })
 
         output$results_table <- renderDT({

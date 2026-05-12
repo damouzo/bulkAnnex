@@ -91,14 +91,25 @@ message("Plotting volcano...")
 vol_df <- res_df %>%
     filter(!is.na(padj)) %>%
     mutate(
-        sig        = padj < opt$alpha & abs(log2FoldChange) >= opt$lfc_thresh,
-        direction  = case_when(
+        sig       = padj < opt$alpha & abs(log2FoldChange) >= opt$lfc_thresh,
+        direction = case_when(
             padj < opt$alpha & log2FoldChange >=  opt$lfc_thresh ~ "Up",
             padj < opt$alpha & log2FoldChange <= -opt$lfc_thresh ~ "Down",
             TRUE ~ "NS"
-        ),
-        label      = ifelse(sig & rank(padj) <= 20, gene_name, NA_character_)
+        )
     )
+# Label top 20 significant genes ranked by combined extremity score:
+# normalised |log2FC| + normalised -log10(padj), equal-weighting both axes.
+label_ids_vol <- local({
+    s <- vol_df[vol_df$sig, ]
+    if (nrow(s) == 0) return(character(0))
+    max_lfc <- max(abs(s$log2FoldChange))
+    max_nlp <- max(-log10(s$padj + .Machine$double.eps))
+    s$score <- abs(s$log2FoldChange) / pmax(max_lfc, 1e-9) +
+               (-log10(s$padj + .Machine$double.eps)) / pmax(max_nlp, 1e-9)
+    head(s$gene_id[order(s$score, decreasing = TRUE)], 20)
+})
+vol_df$label <- ifelse(vol_df$gene_id %in% label_ids_vol, vol_df$gene_name, NA_character_)
 
 dir_colours <- c("Up" = "#d73027", "Down" = "#4575b4", "NS" = "grey70")
 

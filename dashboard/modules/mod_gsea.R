@@ -104,7 +104,8 @@ mod_gsea_server <- function(id, app_data) {
                                 tags$hr(),
                                 tags$h6("ORA branch labels"),
                                 selectInput(ns("td_ora_type"), "ORA database",
-                                            choices = c("GO" = "GO", "KEGG" = "KEGG"),
+                                            choices = c("GO" = "GO", "KEGG" = "KEGG",
+                                                        "Reactome" = "Reactome"),
                                             selected = "GO"),
                                 conditionalPanel(
                                     condition = sprintf("input['%s'] == 'GO'", ns("td_ora_type")),
