@@ -70,6 +70,11 @@ write.csv(res_df[, cols_present],
           file = out_csv, row.names = FALSE, quote = FALSE)
 message("Results saved: ", out_csv)
 
+# Preserve full in-memory precision for dashboard recomputation.
+out_rds <- paste0(contrast_id, "_DESeq2_results.rds")
+saveRDS(res_df[, cols_present], out_rds)
+message("Results saved: ", out_rds)
+
 # ---- summary ----------------------------------------------------------------
 n_sig_up   <- sum(res_df$padj < opt$alpha & res_df$log2FoldChange > 0,  na.rm = TRUE)
 n_sig_down <- sum(res_df$padj < opt$alpha & res_df$log2FoldChange < 0,  na.rm = TRUE)
@@ -89,44 +94,57 @@ save_plot <- function(base, p, width = 8, height = 7, gg = TRUE) {
 # ---- volcano plot -----------------------------------------------------------
 message("Plotting volcano...")
 vol_df <- res_df %>%
-    filter(!is.na(padj)) %>%
+    filter(!is.na(padj), !is.na(log2FoldChange)) %>%
     mutate(
         sig       = padj < opt$alpha & abs(log2FoldChange) >= opt$lfc_thresh,
+        padj_plot = pmax(padj, .Machine$double.xmin),
+        neglog10_padj = -log10(padj_plot),
         direction = case_when(
             padj < opt$alpha & log2FoldChange >=  opt$lfc_thresh ~ "Up",
             padj < opt$alpha & log2FoldChange <= -opt$lfc_thresh ~ "Down",
             TRUE ~ "NS"
-        )
+        ),
+        label_base = ifelse(!is.na(gene_name) & nzchar(gene_name), gene_name, gene_id)
     )
-# Label top 20 significant genes ranked by combined extremity score:
-# normalised |log2FC| + normalised -log10(padj), equal-weighting both axes.
+# Label top 30 significant genes ranked by Euclidean distance from origin
+# in normalised [0,1] space (equal weight to both axes regardless of scale).
 label_ids_vol <- local({
     s <- vol_df[vol_df$sig, ]
     if (nrow(s) == 0) return(character(0))
     max_lfc <- max(abs(s$log2FoldChange))
-    max_nlp <- max(-log10(s$padj + .Machine$double.eps))
-    s$score <- abs(s$log2FoldChange) / pmax(max_lfc, 1e-9) +
-               (-log10(s$padj + .Machine$double.eps)) / pmax(max_nlp, 1e-9)
-    head(s$gene_id[order(s$score, decreasing = TRUE)], 20)
+    max_nlp <- max(s$neglog10_padj)
+    s$score <- sqrt(
+        (abs(s$log2FoldChange) / pmax(max_lfc, 1e-9))^2 +
+        (s$neglog10_padj / pmax(max_nlp, 1e-9))^2
+    )
+    head(s$gene_id[order(s$score, decreasing = TRUE)], 30)
 })
-vol_df$label <- ifelse(vol_df$gene_id %in% label_ids_vol, vol_df$gene_name, NA_character_)
+vol_df$label <- ifelse(vol_df$gene_id %in% label_ids_vol, vol_df$label_base, NA_character_)
 
 dir_colours <- c("Up" = "#d73027", "Down" = "#4575b4", "NS" = "grey70")
 
-p_vol <- ggplot(vol_df, aes(x = log2FoldChange, y = -log10(padj),
+p_vol <- ggplot(vol_df, aes(x = log2FoldChange, y = neglog10_padj,
                              colour = direction)) +
     geom_point(size = 0.8, alpha = 0.7) +
-    geom_text_repel(aes(label = label), size = 2.5, max.overlaps = 30, na.rm = TRUE) +
+    geom_text_repel(aes(label = label),
+                    size = 2.5,
+                    max.overlaps = Inf,
+                    box.padding = 0.35,
+                    point.padding = 0.2,
+                    seed = 42,
+                    na.rm = TRUE) +
     geom_vline(xintercept = c(-opt$lfc_thresh, opt$lfc_thresh), linetype = "dashed", colour = "grey40") +
-    geom_hline(yintercept = -log10(opt$alpha), linetype = "dashed", colour = "grey40") +
+    geom_hline(yintercept = -log10(pmax(opt$alpha, .Machine$double.xmin)), linetype = "dashed", colour = "grey40") +
     scale_colour_manual(values = dir_colours) +
     labs(title  = paste0("Volcano: ", contrast_trt, " vs ", contrast_ref),
          x      = "Shrunken log2 fold change",
          y      = expression(-log[10](padj)),
          colour = NULL) +
-    theme_bw(base_size = 12)
+    theme_bw(base_size = 12) +
+    theme(plot.margin = margin(t = 20, r = 10, b = 5, l = 5, unit = "pt")) +
+    coord_cartesian(clip = "off")
 
-save_plot(paste0(contrast_id, "_volcano"), p_vol)
+save_plot(paste0(contrast_id, "_volcano"), p_vol, width = 8, height = 8)
 
 # ---- MA plot ----------------------------------------------------------------
 message("Plotting MA...")

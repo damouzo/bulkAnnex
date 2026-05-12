@@ -13,6 +13,7 @@ process DESEQ2_DGE {
 
     output:
     tuple val(meta), path("${meta.contrast_id}_DESeq2_results.csv"), emit: results
+    path "${meta.contrast_id}_DESeq2_results.rds",                    emit: results_rds
     path "${meta.contrast_id}_volcano.{pdf,png}",                    emit: volcano
     path "${meta.contrast_id}_MA.{pdf,png}",                         emit: ma_plot
     path "${meta.contrast_id}_top_genes_heatmap.{pdf,png}",          optional: true, emit: heatmap

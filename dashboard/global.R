@@ -84,11 +84,24 @@ load_contrasts_meta <- function(results_dir) {
 load_dge_results <- function(results_dir) {
     dge_dir <- file.path(results_dir, "dge")
     if (!dir.exists(dge_dir)) return(list())
-    files <- list.files(dge_dir, pattern = "_DESeq2_results\\.csv$",
-                        full.names = TRUE, recursive = TRUE)
-    if (length(files) == 0) return(list())
-    result <- lapply(files, function(f) read.csv(f, stringsAsFactors = FALSE, check.names = FALSE))
-    names(result) <- sub("_DESeq2_results\\.csv$", "", basename(files))
+
+    # Prefer RDS for full numeric precision; fallback to CSV for legacy runs.
+    rds_files <- list.files(dge_dir, pattern = "_DESeq2_results\\.rds$",
+                            full.names = TRUE, recursive = TRUE)
+    if (length(rds_files) > 0) {
+        result <- lapply(rds_files, function(f) {
+            tryCatch(readRDS(f), error = function(e) NULL)
+        })
+        names(result) <- sub("_DESeq2_results\\.rds$", "", basename(rds_files))
+        result <- Filter(Negate(is.null), result)
+        if (length(result) > 0) return(result)
+    }
+
+    csv_files <- list.files(dge_dir, pattern = "_DESeq2_results\\.csv$",
+                            full.names = TRUE, recursive = TRUE)
+    if (length(csv_files) == 0) return(list())
+    result <- lapply(csv_files, function(f) read.csv(f, stringsAsFactors = FALSE, check.names = FALSE))
+    names(result) <- sub("_DESeq2_results\\.csv$", "", basename(csv_files))
     result
 }
 
@@ -174,6 +187,13 @@ get_gsea_png <- function(results_dir, contrast, database, go_ont = "BP",
     )
     if (is.null(filename)) return(NULL)
     f <- file.path(gsea_dir, filename)
+    if (file.exists(f)) f else NULL
+}
+
+# Helper: return pre-rendered DGE volcano PNG for a contrast, or NULL.
+# Used by mod_dge to avoid recomputation on contrast switches.
+get_dge_volcano_png <- function(results_dir, contrast) {
+    f <- file.path(results_dir, "dge", contrast, paste0(contrast, "_volcano.png"))
     if (file.exists(f)) f else NULL
 }
 
