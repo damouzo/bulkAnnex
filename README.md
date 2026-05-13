@@ -1,8 +1,32 @@
-# bulkAnnex
+<div align="center">
 
-**Downstream bulk RNA-seq analysis pipeline** — QC → normalization → differential expression → GSEA → interactive Shiny dashboard.
+<table>
+<tr>
+<td width="300" align="center">
+<img src="docs/images/bulkAnnex_logo.png" alt="bulkAnnex Logo" width="280"/>
+</td>
+<td align="center">
 
-Takes the gene count matrix from [nf-core/rnaseq](https://nf-co.re/rnaseq/) (`salmon.merged.gene_counts.tsv`) as input.
+## **bulkAnnex**
+
+**Downstream bulk RNA-seq analysis.**  
+From counts to insights.
+
+[![Nextflow](https://img.shields.io/badge/nextflow%20DSL2-%E2%89%A523.10.0-23aa62.svg)](https://www.nextflow.io/)
+[![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
+[![run with docker](https://img.shields.io/badge/run%20with-docker-0db7ed.svg?labelColor=000000)](https://www.docker.com/)
+
+[Quick Start](#quick-start) •
+[Inputs](#inputs) •
+[Pipeline Steps](#pipeline-steps) •
+[Dashboard](#launch-the-dashboard) •
+[Output](#output)
+
+</td>
+</tr>
+</table>
+
+</div>
 
 ---
 
