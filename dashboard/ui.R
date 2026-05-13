@@ -25,7 +25,8 @@ ui <- page_navbar(
         code_font   = font_google("Source Code Pro")
     ),
     header = tags$head(
-        tags$link(rel = "stylesheet", type = "text/css", href = "bulkannex.css")
+        tags$link(rel = "stylesheet", type = "text/css", href = "bulkannex.css"),
+        tags$link(rel = "icon", type = "image/svg+xml", href = "bulkannex_logo.svg")
     ),
     window_title = "bulkAnnex",
 
