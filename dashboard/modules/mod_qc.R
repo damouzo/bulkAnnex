@@ -104,9 +104,9 @@ mod_qc_server <- function(id, app_data) {
                 conditions
             )
 
-            # Scale plot height so bars don't collapse with many samples
-            bar_px  <- max(18L, round(500L / max(nrow(df), 1L) * nrow(df)))
-            plot_h  <- paste0(max(300L, min(bar_px * nrow(df), 1400L)), "px")
+            # Scale plot height: ~35px per bar, min 320px, max 900px.
+            # Fits in one screen for typical datasets; grows gracefully for large ones.
+            plot_h_px <- max(320L, min(35L * nrow(df) + 80L, 900L))
 
             p <- ggplot(df, aes(x = library_size / 1e6, y = sample,
                                 fill = condition, text = paste0(
@@ -118,7 +118,7 @@ mod_qc_server <- function(id, app_data) {
                 scale_fill_manual(values = pal) +
                 labs(x = "Library size (millions)", y = NULL, fill = "Condition") +
                 theme_bw(base_size = 11)
-            ggplotly(p, tooltip = "text", height = max(300L, min(bar_px * nrow(df), 1400L)))
+            ggplotly(p, tooltip = "text", height = plot_h_px)
         })
 
         # Count Distribution: show the pre-rendered log2 CPM boxplot from the pipeline

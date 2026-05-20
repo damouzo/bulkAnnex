@@ -12,7 +12,7 @@ lapply(list.files("modules", pattern = "\\.R$", full.names = TRUE), source)
 
 ui <- page_navbar(
     title = tags$span(
-        tags$img(src = "bulkannex_logo.svg", height = "28px",
+        tags$img(src = "bulkAnnex_logo.png", height = "28px",
                  style = "margin-right: 8px; vertical-align: middle;"),
         "bulkAnnex"
     ),
@@ -26,7 +26,7 @@ ui <- page_navbar(
     ),
     header = tags$head(
         tags$link(rel = "stylesheet", type = "text/css", href = "bulkannex.css"),
-        tags$link(rel = "icon", type = "image/svg+xml", href = "bulkannex_logo.svg")
+        tags$link(rel = "icon", type = "image/png", href = "bulkAnnex_logo.png")
     ),
     window_title = "bulkAnnex",
 
@@ -44,9 +44,9 @@ ui <- page_navbar(
         mod_qc_ui("qc")
     ),
 
-    # ---- Tab 3: Differential Expression ------------------------------------
+    # ---- Tab 3: DGE ---------------------------------------------------------
     nav_panel(
-        title = "Differential Expression",
+        title = "DGE",
         icon  = icon("dna"),
         mod_dge_ui("dge")
     ),

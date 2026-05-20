@@ -1,0 +1,3 @@
+contrast_id,variable,reference,treatment,norm_group
+CellLine_A_KD_vs_Scramble,condition,Scramble,KD,CellLine_A
+CellLine_B_KD_vs_Scramble,condition,Scramble,KD,CellLine_B

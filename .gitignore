@@ -7,7 +7,9 @@ results/
 __pycache__/
 .Rhistory
 AGENTS.md
-data_demo/
+# Generated demo data (large files, not committed)
+data_demo/salmon.merged.gene_counts.tsv
+data_demo/logs/
 *_results/
 results_*/
 docs/internal/

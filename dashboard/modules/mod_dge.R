@@ -4,7 +4,7 @@ mod_dge_ui <- function(id) {
     ns <- NS(id)
     tagList(
         fluidRow(
-            column(12, h3("Differential Expression"))
+            column(12, h3("DGE"))
         ),
         fluidRow(
             column(3,
@@ -251,7 +251,7 @@ mod_dge_server <- function(id, app_data) {
                     pvalue         = signif(pvalue, 3),
                     padj           = signif(padj, 3)
                 ) %>%
-                select(gene_id, gene_name, baseMean, log2FoldChange, pvalue, padj, direction)
+                dplyr::select(gene_id, gene_name, baseMean, log2FoldChange, pvalue, padj, direction)
 
             datatable(df_show,
                       filter   = "top",

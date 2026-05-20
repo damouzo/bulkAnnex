@@ -19,14 +19,32 @@ From counts to insights.
 [Quick Start](#quick-start) •
 [Inputs](#inputs) •
 [Pipeline Steps](#pipeline-steps) •
-[Dashboard](#launch-the-dashboard) •
-[Output](#output)
+[Usage](#usage)
 
 </td>
 </tr>
 </table>
 
 </div>
+
+---
+
+## Demo
+
+https://github.com/user-attachments/assets/e6d011e0-4c58-4893-a75f-6a1fa377c520
+
+---
+
+## What it does
+
+bulkAnnex automates the complete downstream workflow for bulk RNA-seq data:
+
+- **Nextflow DSL2 pipeline** — end-to-end, reproducible, containerised
+- **Starts from nf-core/rnaseq output** — takes `salmon.merged.gene_counts.tsv` directly
+- **Group-aware normalisation** — independent DESeq2 models per `norm_group` (cell lines, tissues)
+- **Differential expression** — DESeq2 with lfcShrink, volcano, MA plot, top-gene heatmap
+- **Gene set enrichment** — GO (BP/MF/CC), KEGG, Reactome via clusterProfiler + pathview
+- **Interactive dashboard** — R Shiny app with QC, DGE, GSEA, and Gene Explorer tabs
 
 ---
 
@@ -83,33 +101,6 @@ MNC_DDX41_Patient_vs_Healthy,condition,MNC_Healthy,MNC_DDX41_Patient,MNC
 - `dge/` and `gsea/` output directories remain flat — contrast IDs are unique across groups.
 - **Backward compatible**: omitting `norm_group` is equivalent to `norm_group = "all"` for every row; output structure is identical to previous runs.
 
-### Output structure with norm_group
-
-```
-results/
-├── qc/                          # global QC — all samples
-├── normalization/
-│   ├── NB4/                     # DESeq2 model for NB4 samples only
-│   │   ├── deseq2_dds.rds
-│   │   └── deseq2_vst_counts.tsv
-│   ├── MSCline/
-│   ├── MNC/
-│   └── MSC/
-├── dge/                         # flat — one dir per contrast_id (unchanged)
-└── gsea/
-```
-
-Without `norm_group` (or all rows set to `"all"`):
-
-```
-results/
-├── normalization/               # flat — single DESeq2 model (previous behaviour)
-│   ├── deseq2_dds.rds
-│   └── deseq2_vst_counts.tsv
-├── dge/
-└── gsea/
-```
-
 ---
 
 ## Pipeline steps
@@ -144,53 +135,7 @@ nextflow run main.nf \
   --contrasts contrasts.csv \
   --outdir    /data/projects/myproject/bulkannex_results
 
-# Or use Nextflow's native -w flag (equivalent)
-nextflow run main.nf -profile apocrita,singularity -w /data/scratch/myuser/nxf_work ...
-
-# Local (Docker)
-nextflow run main.nf \
-  -profile docker \
-  --input    samplesheet.csv \
-  --counts   salmon.merged.gene_counts.tsv \
-  --contrasts contrasts.csv \
-  --outdir    results
 ```
-
-### Work directory
-
-The `work/` folder holds all intermediate files and can grow very large. Keep it **separate from `--outdir`**:
-
-| Situation | Recommendation |
-|-----------|---------------|
-| Apocrita HPC | Uses `/data/scratch/$USER/bulkannex_work` by default (via the `apocrita` profile) |
-| Other HPC | `--work_dir /scratch/$USER/nxf_work` or `-w /scratch/$USER/nxf_work` |
-| Local | Default `./work` is fine; clean with `nextflow clean -f` after successful run |
-
----
-
-## Launch the dashboard
-
-```bash
-bash dashboard/launch_dashboard.sh bulkannex_results 3838
-```
-
-Then open `http://localhost:3838` in your browser.
-
----
-
-## Requirements
-
-- Nextflow >= 23.10
-- Singularity, Docker, or conda
-- R ≥ 4.3 (for local dashboard only)
-
----
-
-## Output
-
-See [docs/output.md](docs/output.md) for a full description of output files.
-
-
 ---
 
 ## License

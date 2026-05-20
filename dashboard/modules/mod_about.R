@@ -2,38 +2,53 @@
 
 mod_about_ui <- function(id) {
     ns <- NS(id)
-    tagList(
-        fluidRow(
-            column(12, h3("About bulkAnnex"))
+
+    fluidRow(
+        column(8,
+            card(
+                card_header("About bulkAnnex"),
+                HTML(paste0(
+                    "<div style='display:flex; align-items:center; gap:16px; margin-bottom:16px;'>",
+                    "<img src='bulkAnnex_logo.png' height='56px'>",
+                    "<div><h4 style='margin:0;'>bulkAnnex v1.0</h4>",
+                    "<p style='margin:0; color:#666;'>Bulk RNA-seq downstream analysis pipeline &amp; dashboard</p></div>",
+                    "</div>",
+                    "<p>Interactive visualisation and exploration dashboard for bulk RNA-seq data ",
+                    "processed through the <strong>bulkAnnex</strong> Nextflow DSL2 pipeline. ",
+                    "Picks up where nf-core/rnaseq leaves off — starting from the Salmon gene ",
+                    "count matrix and running normalisation, differential expression, and gene ",
+                    "set enrichment. Reproducible, containerised, and runs identically on a ",
+                    "laptop or an HPC cluster.</p>",
+                    "<h5>Pipeline modules</h5>",
+                    "<ul>",
+                    "<li>Input validation (samplesheet, counts matrix, contrasts)</li>",
+                    "<li>Quality control: library sizes, count distribution, PCA, correlation heatmap</li>",
+                    "<li>Normalisation per norm_group (DESeq2 VST)</li>",
+                    "<li>Differential expression (DESeq2 + lfcShrink): volcano, MA plot, heatmap</li>",
+                    "<li>Gene set enrichment (fgsea / clusterProfiler): GO BP/MF/CC, KEGG, Reactome</li>",
+                    "</ul>",
+                    "<h5>Dashboard tabs</h5>",
+                    "<ul>",
+                    "<li><strong>Overview:</strong> Sample table, norm_group summary, contrast overview</li>",
+                    "<li><strong>QC:</strong> Library sizes, count distribution, PCA, correlation heatmap</li>",
+                    "<li><strong>DGE:</strong> Volcano plots with interactive labelling, results table</li>",
+                    "<li><strong>GSEA:</strong> Dotplot, ridgeplot, running score, results table</li>",
+                    "<li><strong>Gene Explorer:</strong> Per-gene expression across samples and conditions</li>",
+                    "</ul>",
+                    "<hr>",
+                    "<p>",
+                    "<a href='https://github.com/damouzo/bulkAnnex' target='_blank' style='margin-right:16px;'>",
+                    "<i class='fab fa-github'></i> GitHub Repository</a>",
+                    "</p>",
+                    "<p class='text-muted' style='font-size:0.85rem;'>",
+                    "<em>bulkAnnex v1.0 &nbsp;|&nbsp; Nextflow DSL2 &nbsp;+&nbsp; R/DESeq2/clusterProfiler &nbsp;+&nbsp; R/Shiny/bslib</em></p>"
+                ))
+            )
         ),
-        fluidRow(
-            column(8,
-                card(
-                    card_header("What is bulkAnnex?"),
-                p("bulkAnnex is a Nextflow DSL2 pipeline for downstream bulk RNA-seq analysis.
-                   It picks up where nf-core/rnaseq leaves off — starting from the Salmon
-                   gene count matrix and running QC, normalisation, differential expression
-                   (DESeq2), gene set enrichment (GO, KEGG, Reactome),
-                   and this interactive dashboard. Reproducible, containerised, and runs
-                   identically on a laptop or a thousand-core HPC cluster.")
-                )
-            ),
-            column(4,
-                card(
-                    card_header("Links"),
-                    tags$ul(
-                        tags$li(tags$a(href = "https://github.com/damouzo/bulkAnnex",
-                                       target = "_blank",
-                                       icon("github"), " GitHub repository")),
-                        tags$li(tags$a(href = "https://damouzo.github.io/",
-                                       target = "_blank",
-                                       icon("user"), " Portfolio"))
-                    )
-                ),
-                card(
-                    card_header("Software versions"),
-                    uiOutput(ns("versions_table"))
-                )
+        column(4,
+            card(
+                card_header("Software versions"),
+                uiOutput(ns("versions_table"))
             )
         )
     )

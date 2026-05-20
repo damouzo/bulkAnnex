@@ -1,0 +1,13 @@
+sample,condition,norm_group
+CellLine_A_Scr_1,Scramble,CellLine_A
+CellLine_A_Scr_2,Scramble,CellLine_A
+CellLine_A_Scr_3,Scramble,CellLine_A
+CellLine_A_KD_1,KD,CellLine_A
+CellLine_A_KD_2,KD,CellLine_A
+CellLine_A_KD_3,KD,CellLine_A
+CellLine_B_Scr_1,Scramble,CellLine_B
+CellLine_B_Scr_2,Scramble,CellLine_B
+CellLine_B_Scr_3,Scramble,CellLine_B
+CellLine_B_KD_1,KD,CellLine_B
+CellLine_B_KD_2,KD,CellLine_B
+CellLine_B_KD_3,KD,CellLine_B
