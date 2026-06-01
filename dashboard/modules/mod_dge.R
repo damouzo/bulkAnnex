@@ -1,4 +1,4 @@
-# modules/mod_dge.R — Differential Expression tab
+# modules/mod_dge.R — DGE tab
 
 mod_dge_ui <- function(id) {
     ns <- NS(id)
@@ -250,8 +250,9 @@ mod_dge_server <- function(id, app_data) {
                     baseMean       = round(baseMean, 1),
                     pvalue         = signif(pvalue, 3),
                     padj           = signif(padj, 3)
-                ) %>%
-                dplyr::select(gene_id, gene_name, baseMean, log2FoldChange, pvalue, padj, direction)
+                )
+            df_show <- df_show[, c("gene_id", "gene_name", "baseMean", "log2FoldChange",
+                                   "pvalue", "padj", "direction"), drop = FALSE]
 
             datatable(df_show,
                       filter   = "top",
