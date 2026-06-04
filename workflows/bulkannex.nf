@@ -33,7 +33,7 @@ workflow BULKANNEX {
     // SINGULARITY_PULL runs natively (no container) on SLURM so that mksquashfs
     // has real RAM. It skips immediately if the SIF already exists.
     // Evaluated at parse time: if SIF is present from the start, skip entirely.
-    def sif_path = "${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.4.sif"
+    def sif_path = params.container  // singularity profile sets this to the SIF path; other profiles keep the docker URL
     ch_container_ready = Channel.value(true)  // default: SIF exists, proceed immediately
 
     if (workflow.containerEngine == 'singularity' && !new File(sif_path).exists()) {
