@@ -13,6 +13,7 @@ include { SINGULARITY_PULL      } from '../modules/local/singularity_pull/main'
 include { QC                    } from '../subworkflows/local/qc/main'
 include { DGE_GSEA              } from '../subworkflows/local/dge_gsea/main'
 include { GSEA_TREEDOT          } from '../modules/local/gsea_treedot/main'
+include { CONTRAST_COMPARISON   } from '../modules/local/contrast_comparison/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -32,7 +33,7 @@ workflow BULKANNEX {
     // SINGULARITY_PULL runs natively (no container) on SLURM so that mksquashfs
     // has real RAM. It skips immediately if the SIF already exists.
     // Evaluated at parse time: if SIF is present from the start, skip entirely.
-    def sif_path = "${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.3.sif"
+    def sif_path = "${projectDir}/containers/bulkannex_r/bulkannex_r_1.0.4.sif"
     ch_container_ready = Channel.value(true)  // default: SIF exists, proceed immediately
 
     if (workflow.containerEngine == 'singularity' && !new File(sif_path).exists()) {
@@ -130,6 +131,19 @@ workflow BULKANNEX {
                 .collect()
         )
         ch_versions = ch_versions.mix(GSEA_TREEDOT.out.versions)
+    }
+
+    // ---- 5c. Cross-contrast DEG comparison ----------------------------------
+    // Collects all DGE CSVs into a single task that generates Venn diagrams,
+    // UpSet plots, and Log2FC correlation heatmaps.
+    // Skipped automatically by contrast_comparison.R if < 2 contrasts are present.
+    if (!params.skip_contrast_comparison) {
+        CONTRAST_COMPARISON(
+            DGE_GSEA.out.dge_results
+                .map { _meta, csv -> csv }
+                .collect()
+        )
+        ch_versions = ch_versions.mix(CONTRAST_COMPARISON.out.versions)
     }
 
     // ---- 6. Shiny dashboard -------------------------------------------------

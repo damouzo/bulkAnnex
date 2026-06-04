@@ -2,7 +2,7 @@ FROM bioconductor/bioconductor_docker:RELEASE_3_20
 
 LABEL org.opencontainers.image.title="bulkannex_r"
 LABEL org.opencontainers.image.description="R/Bioconductor environment for bulkAnnex bulk RNA-seq downstream analysis pipeline"
-LABEL org.opencontainers.image.version="1.0.3"
+LABEL org.opencontainers.image.version="1.0.4"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # ---- System dependencies -----------------------------------------------------
@@ -33,7 +33,8 @@ RUN Rscript -e " \
             'AnnotationDbi', \
             'pathview', \
             'ggtree', \
-            'edgeR' \
+            'edgeR', \
+            'ComplexHeatmap' \
         ), \
         ask    = FALSE, \
         update = FALSE \
@@ -69,7 +70,10 @@ RUN Rscript -e " \
             'plotly', \
             'htmlwidgets', \
             'shinyWidgets', \
-            'shinycssloaders' \
+            'shinycssloaders', \
+            'ggVennDiagram', \
+            'ComplexUpset', \
+            'circlize' \
         ), \
         repos = 'https://cloud.r-project.org' \
     ) \
@@ -79,7 +83,8 @@ RUN Rscript -e " \
 RUN Rscript -e " \
     required <- c('DESeq2', 'GenomeInfoDbData', 'clusterProfiler', 'ReactomePA', 'fgsea', \
               'org.Hs.eg.db', 'org.Mm.eg.db', 'ashr', \
-              'ggridges', 'shiny', 'pathview', 'ggtree', 'cowplot'); \
+              'ggridges', 'shiny', 'pathview', 'ggtree', 'cowplot', \
+              'ComplexHeatmap', 'ggVennDiagram', 'ComplexUpset', 'circlize'); \
     missing  <- required[!sapply(required, requireNamespace, quietly = TRUE)]; \
     if (length(missing) > 0) stop('Missing required packages: ', paste(missing, collapse=', ')); \
     message('All required packages present.') \

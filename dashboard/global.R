@@ -20,6 +20,24 @@ suppressPackageStartupMessages({
     # The Ridgeplot tab falls back gracefully if it is unavailable.
 })
 
+# ---- Optional: Common DEGs packages (container >= 1.0.4) --------------------
+# ggVennDiagram, ComplexUpset, ComplexHeatmap, circlize are required for the
+# "Common DEGs" sub-tab in the Gene Explorer. If unavailable (older container),
+# the tab shows a graceful upgrade message instead of crashing.
+tryCatch({
+    suppressPackageStartupMessages({
+        library(ggVennDiagram)
+        library(ComplexUpset)
+        library(ComplexHeatmap)
+        library(circlize)
+        library(grid)
+    })
+    message("Common DEGs packages loaded (ggVennDiagram, ComplexUpset, ComplexHeatmap).")
+}, error = function(e) {
+    message("Optional Common DEGs packages not available (container < 1.0.4). ",
+            "The 'Common DEGs' tab will display an upgrade notice.")
+})
+
 # Null-coalescing operator (rlang-style) — used in modules without requiring rlang on the search path.
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
