@@ -174,16 +174,24 @@ make_upset <- function(sets, direction) {
         base_annotations = list(
             "Intersection\nsize" = intersection_size(
                 counts    = TRUE,
-                mapping   = aes(fill = !!sym(names(sets)[1]))   # dummy fill overridden below
+                mapping   = aes(fill = !!sym(names(sets)[1]))
             ) +
-            scale_fill_manual(values = colour, guide = "none")
+            # Provide values for both logical levels (TRUE/FALSE) — a single value
+            # causes "Insufficient values in manual scale" with ggplot2 >= 3.4.
+            scale_fill_manual(
+                values = c("TRUE" = colour, "FALSE" = colour),
+                guide  = "none"
+            )
         ),
         set_sizes = upset_set_size(
             geom = geom_bar(fill = colour)
         ),
         width_ratio   = 0.2,
         sort_sets     = FALSE,
-        sort_intersections_by = "degree"
+        # "cardinality" shows the largest intersections first and avoids
+        # rendering all 2^n combinations when n is large (e.g. 10 contrasts).
+        sort_intersections_by = "cardinality",
+        n_intersections       = 40   # cap at 40 bars to keep the plot readable
     ) +
     ggtitle(label) +
     theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 13))

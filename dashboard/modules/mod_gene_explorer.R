@@ -45,10 +45,10 @@ mod_gene_explorer_ui <- function(id) {
                                     strong("Contrasts to compare"),
                                     uiOutput(ns("cmp_contrast_check_ui")),
                                     hr(),
-                                    sliderInput(ns("cmp_padj"), "adj. p-value \u2264",
-                                        min = 0.001, max = 0.2, value = 0.05, step = 0.005),
-                                    sliderInput(ns("cmp_lfc"), "|log2FC| \u2265",
-                                        min = 0, max = 3, value = 0.5, step = 0.1),
+                                    numericInput(ns("cmp_padj"), "adj. p-value \u2264",
+                                        value = 0.05, min = 0, max = 1, step = 0.01),
+                                    numericInput(ns("cmp_lfc"), "|log2FC| \u2265",
+                                        value = 0.5, min = 0, max = NA, step = 0.1),
                                     hr(),
                                     actionButton(ns("cmp_apply"), "Apply Changes",
                                         class = "btn-primary w-100",
@@ -391,7 +391,7 @@ mod_gene_explorer_server <- function(id, app_data) {
             # Package guard
             if (!cmp_pkgs_ok) {
                 grid::grid.text(
-                    "Package(s) unavailable.\nPlease rebuild the container to version \u2265 1.0.4.",
+                    "Package(s) unavailable.\nPlease rebuild the container to version \u2265 1.0.5.",
                     gp = grid::gpar(fontsize = 12, col = "firebrick"))
                 return(invisible(NULL))
             }
