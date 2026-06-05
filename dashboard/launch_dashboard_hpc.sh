@@ -12,10 +12,11 @@
 #   time         SLURM time limit         (default: 04:00:00)
 #   mem          SLURM memory request     (default: 8G)
 #   sif          Path to Singularity SIF  (default: $BULKANNEX_SIF env var,
-#                then auto-detect, then docker://damouzo/bulkannex_r:1.0.0)
+#                then auto-detect latest local SIF, then
+#                docker://damouzo/bulkannex_r:1.0.5)
 #
 # Example:
-#   BULKANNEX_SIF=/path/to/bulkannex_r_1.0.0.sif \
+#   BULKANNEX_SIF=/path/to/bulkannex_r_1.0.5.sif \
 #     bash launch_dashboard_hpc.sh demo_results
 
 set -euo pipefail
@@ -31,13 +32,17 @@ RESULTS_DIR="$(realpath "${RESULTS_DIR}")"
 
 # ---- Resolve Singularity image -----------------------------------------------
 if [ -z "${SIF}" ]; then
-    CANDIDATE="$(realpath "${SCRIPT_DIR}/../../containers/bulkannex_r/bulkannex_r_1.0.0.sif" 2>/dev/null || true)"
-    if [ -f "${CANDIDATE}" ]; then
-        SIF="${CANDIDATE}"
-    else
-        SIF="docker://damouzo/bulkannex_r:1.0.0"
+    SIF_DIR="${SCRIPT_DIR}/../../containers/bulkannex_r"
+    if [ -d "${SIF_DIR}" ]; then
+        CANDIDATE="$(ls -1 "${SIF_DIR}"/bulkannex_r_*.sif 2>/dev/null | sort -V | tail -n 1 || true)"
+        if [ -n "${CANDIDATE}" ] && [ -f "${CANDIDATE}" ]; then
+            SIF="${CANDIDATE}"
+        fi
+    fi
+    if [ -z "${SIF}" ]; then
+        SIF="docker://damouzo/bulkannex_r:1.0.5"
         echo "  NOTE: local SIF not found — will pull from Docker registry on compute node."
-        echo "  To use a pre-pulled SIF, set: export BULKANNEX_SIF=/path/to/bulkannex_r_1.0.0.sif"
+        echo "  To use a pre-pulled SIF, set: export BULKANNEX_SIF=/path/to/bulkannex_r_1.0.5.sif"
         echo ""
     fi
 fi
