@@ -409,7 +409,9 @@ mod_dge_server <- function(id, app_data) {
                         legend.position = "none",
                         text = ggplot2::element_text(color = "black"),
                         plot.title = ggplot2::element_text(
-                            hjust = 0.5, face = "bold", size = 13))
+                            hjust = 0.5, face = "bold", size = 13),
+                        plot.margin = ggplot2::margin(16, 36, 16, 36, unit = "pt")) +
+                    ggplot2::coord_cartesian(clip = "off")
                 print(p)
 
             } else if (plot_type == "upset") {
