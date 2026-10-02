@@ -18,6 +18,13 @@ mod_dge_ui <- function(id) {
                     numericInput(ns("n_label"),  "Label top N genes", value = 30, min = 0, max = 100),
                     sliderInput(ns("label_size"), "Label font size",
                                 min = 6, max = 16, value = 9, step = 1),
+                    textAreaInput(ns("must_genes"), "Genes to always label",
+                                  value = "", rows = 2,
+                                  placeholder = "e.g. EGR2, LTF"),
+                    fluidRow(
+                        column(6, checkboxInput(ns("highlight_labels"), "Highlight label", value = FALSE)),
+                        column(6, checkboxInput(ns("hide_top_n"), "Hide top N", value = FALSE))
+                    ),
                     actionButton(ns("apply"), "Apply settings",
                                  icon = icon("play"),
                                  class = "btn-primary w-100 mt-2"),
@@ -134,6 +141,24 @@ mod_dge_server <- function(id, app_data) {
                 )
         })
 
+        parse_genes <- function(x) {
+            g <- unlist(strsplit(x %||% "", "[,;[:space:]]+"))
+            unique(g[nzchar(g)])
+        }
+
+        collect_volcano_params <- function(contrast) {
+            list(
+                contrast         = contrast,
+                padj_cut         = input$padj_cut,
+                lfc_cut          = input$lfc_cut,
+                n_label          = input$n_label,
+                label_size       = input$label_size,
+                must_genes       = input$must_genes,
+                highlight_labels = isTRUE(input$highlight_labels),
+                hide_top_n       = isTRUE(input$hide_top_n)
+            )
+        }
+
         build_volcano_plot <- function(df_raw, p) {
             req(nrow(df_raw) > 0)
 
@@ -161,7 +186,7 @@ mod_dge_server <- function(id, app_data) {
 
             n_lab  <- min(p$n_label, nrow(df))
             sig_df <- df %>% filter(direction != "NS")
-            top_ids <- if (nrow(sig_df) > 0 && n_lab > 0) {
+            top_ids <- if (!isTRUE(p$hide_top_n) && nrow(sig_df) > 0 && n_lab > 0) {
                 max_lfc <- max(abs(sig_df$log2FoldChange), na.rm = TRUE)
                 max_nlp <- max(sig_df$neglog10_padj, na.rm = TRUE)
                 sig_df %>%
@@ -173,11 +198,20 @@ mod_dge_server <- function(id, app_data) {
                     head(n_lab) %>%
                     pull(gene_id)
             } else character(0)
-            df$label <- ifelse(df$gene_id %in% top_ids, df$label_base, NA_character_)
+            must <- parse_genes(p$must_genes)
+            df$is_must <- toupper(df$label_base) %in% toupper(must) |
+                toupper(df$gene_id) %in% toupper(must)
+            highlight <- isTRUE(p$highlight_labels)
+
+            # Highlighted genes get their own yellow layer, so skip them in the regular one
+            regular_ids <- if (highlight) top_ids else union(top_ids, df$gene_id[df$is_must])
+            df$label <- ifelse(df$gene_id %in% regular_ids & !(highlight & df$is_must),
+                               df$label_base, NA_character_)
+            hl_df <- df[df$is_must, , drop = FALSE]
 
             dir_col <- c("Up" = "#d73027", "Down" = "#4575b4", "NS" = "#bbbbbb")
 
-            ggplot(df, aes(x = log2FoldChange, y = neglog10_padj, colour = direction)) +
+            gg <- ggplot(df, aes(x = log2FoldChange, y = neglog10_padj, colour = direction)) +
                 geom_point(size = 0.8, alpha = 0.7) +
                 ggrepel::geom_text_repel(aes(label = label),
                                          size = p$label_size / 3,
@@ -185,7 +219,30 @@ mod_dge_server <- function(id, app_data) {
                                          box.padding = 0.35,
                                          point.padding = 0.2,
                                          seed = 42,
-                                         na.rm = TRUE) +
+                                         na.rm = TRUE)
+
+            if (highlight && nrow(hl_df) > 0) {
+                gg <- gg +
+                    geom_point(data = hl_df,
+                               aes(x = log2FoldChange, y = neglog10_padj),
+                               inherit.aes = FALSE,
+                               shape = 21, size = 2.8, stroke = 0.8,
+                               fill = "#FFD700", colour = "grey20") +
+                    ggrepel::geom_text_repel(data = hl_df,
+                                             aes(x = log2FoldChange, y = neglog10_padj,
+                                                 label = label_base),
+                                             inherit.aes = FALSE,
+                                             colour = "#FFD700",
+                                             bg.color = "grey20", bg.r = 0.15,
+                                             fontface = "bold",
+                                             size = p$label_size / 3,
+                                             max.overlaps = Inf,
+                                             box.padding = 0.35,
+                                             point.padding = 0.2,
+                                             seed = 42)
+            }
+
+            gg +
                 geom_vline(xintercept = c(-p$lfc_cut, p$lfc_cut), linetype = "dashed", colour = "grey40") +
                 geom_hline(yintercept = -log10(pmax(p$padj_cut, .Machine$double.xmin)), linetype = "dashed", colour = "grey40") +
                 scale_colour_manual(values = dir_col) +
@@ -207,13 +264,18 @@ mod_dge_server <- function(id, app_data) {
         }, ignoreInit = TRUE)
 
         observeEvent(input$apply, {
-            applied_volcano_params(list(
-                contrast = input$contrast,
-                padj_cut = input$padj_cut,
-                lfc_cut = input$lfc_cut,
-                n_label = input$n_label,
-                label_size = input$label_size
-            ))
+            applied_volcano_params(collect_volcano_params(input$contrast))
+
+            must <- parse_genes(input$must_genes)
+            df_raw <- data()$dge[[input$contrast]]
+            if (length(must) > 0 && !is.null(df_raw)) {
+                known <- toupper(c(df_raw$gene_name, df_raw$gene_id))
+                missing <- must[!toupper(must) %in% known]
+                if (length(missing) > 0) {
+                    showNotification(paste("Genes not found:", paste(missing, collapse = ", ")),
+                                     type = "warning")
+                }
+            }
         })
 
         output$volcano_plot <- renderImage({
@@ -251,13 +313,7 @@ mod_dge_server <- function(id, app_data) {
                 ))
             }
 
-            p_use <- if (apply_active) p_applied else list(
-                contrast = contrast,
-                padj_cut = input$padj_cut,
-                lfc_cut = input$lfc_cut,
-                n_label = input$n_label,
-                label_size = input$label_size
-            )
+            p_use <- if (apply_active) p_applied else collect_volcano_params(contrast)
 
             tmpfile <- tempfile(fileext = ".png")
             p_vol <- build_volcano_plot(df_raw, p_use)
@@ -284,13 +340,7 @@ mod_dge_server <- function(id, app_data) {
                 p_use <- if (!is.null(p_applied) && identical(p_applied$contrast, contrast)) {
                     p_applied
                 } else {
-                    list(
-                        contrast = contrast,
-                        padj_cut = input$padj_cut,
-                        lfc_cut = input$lfc_cut,
-                        n_label = input$n_label,
-                        label_size = input$label_size
-                    )
+                    collect_volcano_params(contrast)
                 }
 
                 p_vol <- build_volcano_plot(df_raw, p_use)
