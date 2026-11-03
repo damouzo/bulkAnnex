@@ -15,6 +15,7 @@ workflow QC {
     ch_versions = ch_versions.mix(DESEQ2_QC.out.versions)
 
     emit:
+    raw_counts          = DESEQ2_QC.out.raw_counts
     vst_matrix          = DESEQ2_QC.out.vst_matrix
     metrics             = DESEQ2_QC.out.metrics
     library_sizes       = DESEQ2_QC.out.library_sizes

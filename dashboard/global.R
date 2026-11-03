@@ -69,18 +69,19 @@ load_vst_counts <- function(results_dir) {
     # Count Distribution) — it is not confounded by norm_group boundaries and is
     # 100% valid for cross-group comparisons in exploratory plots.
     #
-    # The per-norm_group VSTs in normalization/<group>/deseq2_vst_counts.tsv are
-    # only needed for DGE; when multiple groups run they OVERWRITE each other
-    # under normalization/ (flat publish), so we NEVER use that file for the
-    # dashboard.
+    # The per-norm_group VSTs under counts/norm/<group>/deseq2_vst_counts.tsv are
+    # design-aware (blind=FALSE) and scoped to one group; they are used by DGE,
+    # not by the dashboard.
     qc_vst <- file.path(results_dir, "qc", "qc_vst_matrix.tsv")
     if (file.exists(qc_vst)) {
         return(read.delim(qc_vst, check.names = FALSE, stringsAsFactors = FALSE))
     }
-    # Legacy single-group runs that pre-date the QC blind-VST output.
-    flat <- file.path(results_dir, "normalization", "deseq2_vst_counts.tsv")
-    if (file.exists(flat)) {
-        return(read.delim(flat, check.names = FALSE, stringsAsFactors = FALSE))
+    # Legacy fallback for single-group runs without the QC blind-VST output.
+    for (flat in c(file.path(results_dir, "counts", "norm", "deseq2_vst_counts.tsv"),
+                   file.path(results_dir, "normalization", "deseq2_vst_counts.tsv"))) {
+        if (file.exists(flat)) {
+            return(read.delim(flat, check.names = FALSE, stringsAsFactors = FALSE))
+        }
     }
     data.frame()
 }

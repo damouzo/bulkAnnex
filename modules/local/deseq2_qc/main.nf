@@ -13,6 +13,7 @@ process DESEQ2_QC {
     path samplesheet
 
     output:
+    path 'raw_counts.tsv',                 emit: raw_counts
     path 'qc_vst_matrix.tsv',              emit: vst_matrix
     path 'qc_metrics.csv',                 emit: metrics
     path 'qc_library_sizes.{pdf,png}',     emit: library_sizes

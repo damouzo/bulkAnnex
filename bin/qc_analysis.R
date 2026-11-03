@@ -55,6 +55,14 @@ vst_df <- cbind(gene_id = rownames(vst_df), gene_name = gene_names, vst_df)
 write.table(vst_df, file = paste0(opt$prefix, "_vst_matrix.tsv"),
             sep = "\t", quote = FALSE, row.names = FALSE)
 
+# ---- save raw (rounded) count matrix ----------------------------------------
+# Integer matrix actually passed to DESeq2 — published for reproducibility.
+message("Saving raw count matrix...")
+raw_df <- as.data.frame(counts_int)
+raw_df <- cbind(gene_id = rownames(counts_int), gene_name = gene_names, raw_df)
+write.table(raw_df, file = "raw_counts.tsv",
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
 # ---- QC metrics table -------------------------------------------------------
 message("Computing QC metrics...")
 lib_sizes   <- colSums(counts_int)

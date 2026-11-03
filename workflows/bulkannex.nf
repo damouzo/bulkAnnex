@@ -67,7 +67,7 @@ workflow BULKANNEX {
     // Extract the unique norm_group values from the validated samplesheet and
     // launch one DESEQ2_NORMALIZATION task per group.  When every sample has
     // norm_group = "all" (no column supplied by the user) there is exactly one
-    // task and results land in normalization/ flat — identical to the old layout.
+    // task and results land flat in counts/norm/ — one output set per group.
     ch_norm_input = INPUT_CHECK.out.samplesheet
         .splitCsv(header: true, strip: true)
         .map { row -> row.norm_group }
