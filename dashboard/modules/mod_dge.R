@@ -28,7 +28,9 @@ mod_dge_ui <- function(id) {
                     actionButton(ns("apply"), "Apply settings",
                                  icon = icon("play"),
                                  class = "btn-primary w-100 mt-2"),
-                    downloadButton(ns("download_volcano"), "Download volcano PNG",
+                    downloadButton(ns("download_volcano"), "Download PNG",
+                                   class = "btn-outline-secondary w-100 mt-2"),
+                    downloadButton(ns("download_volcano_pdf"), "Download PDF",
                                    class = "btn-outline-secondary w-100 mt-2")
                 )
             ),
@@ -325,6 +327,21 @@ mod_dge_server <- function(id, app_data) {
             )
         }, deleteFile = FALSE)
 
+        # Build the currently applied volcano plot; shared by the PNG/PDF exports.
+        current_volcano_plot <- function(contrast) {
+            df_raw <- data()$dge[[contrast]]
+            if (is.null(df_raw) || nrow(df_raw) == 0) return(NULL)
+
+            p_applied <- applied_volcano_params()
+            p_use <- if (!is.null(p_applied) && identical(p_applied$contrast, contrast)) {
+                p_applied
+            } else {
+                collect_volcano_params(contrast)
+            }
+
+            build_volcano_plot(df_raw, p_use)
+        }
+
         output$download_volcano <- downloadHandler(
             filename = function() {
                 contrast <- input$contrast %||% "contrast"
@@ -333,18 +350,25 @@ mod_dge_server <- function(id, app_data) {
             content = function(file) {
                 contrast <- input$contrast
                 req(contrast)
-                df_raw <- data()$dge[[contrast]]
-                req(!is.null(df_raw), nrow(df_raw) > 0)
+                p_vol <- current_volcano_plot(contrast)
+                req(!is.null(p_vol))
+                ggplot2::ggsave(file, p_vol, device = "png",
+                                width = 8, height = 8, dpi = 300, bg = "white")
+            }
+        )
 
-                p_applied <- applied_volcano_params()
-                p_use <- if (!is.null(p_applied) && identical(p_applied$contrast, contrast)) {
-                    p_applied
-                } else {
-                    collect_volcano_params(contrast)
-                }
-
-                p_vol <- build_volcano_plot(df_raw, p_use)
-                ggplot2::ggsave(file, p_vol, width = 8, height = 8, dpi = 300, bg = "white")
+        output$download_volcano_pdf <- downloadHandler(
+            filename = function() {
+                contrast <- input$contrast %||% "contrast"
+                paste0(contrast, "_volcano_dashboard.pdf")
+            },
+            content = function(file) {
+                contrast <- input$contrast
+                req(contrast)
+                p_vol <- current_volcano_plot(contrast)
+                req(!is.null(p_vol))
+                ggplot2::ggsave(file, p_vol, device = "pdf",
+                                width = 8, height = 8, bg = "white")
             }
         )
 
