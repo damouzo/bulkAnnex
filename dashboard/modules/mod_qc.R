@@ -67,7 +67,42 @@ mod_qc_ui <- function(id) {
                         )
                     ),
                     nav_panel("Correlation Heatmap",
-                        imageOutput(ns("corr_heatmap"), width = "100%", height = "auto")
+                        fluidRow(
+                            column(3,
+                                tags$div(
+                                    style = "border-right:1px solid #dee2e6; min-height:480px; padding:6px 14px 6px 4px;",
+                                    tags$p(tags$strong("Heatmap options"),
+                                           style = "font-size:0.9rem; margin-bottom:10px;"),
+                                    uiOutput(ns("corr_norm_group_ui")),
+                                    tags$p("Samples to include:",
+                                           style = "font-size:0.83rem; margin-bottom:3px;"),
+                                    selectizeInput(ns("corr_samples"), label = NULL,
+                                        choices  = c(),
+                                        multiple = TRUE,
+                                        width    = "100%",
+                                        options  = list(
+                                            placeholder = "All samples",
+                                            plugins     = list("remove_button")
+                                        )
+                                    ),
+                                    actionButton(ns("corr_apply"), "Apply",
+                                        class = "btn-primary btn-sm",
+                                        style = "width:100%; margin-top:8px;"),
+                                    actionButton(ns("corr_reset"), "Reset to all",
+                                        class = "btn-outline-secondary btn-sm",
+                                        style = "width:100%; margin-top:4px;"),
+                                    downloadButton(ns("corr_dl_png"), "Download PNG",
+                                        class = "btn-outline-secondary btn-sm",
+                                        style = "width:100%; margin-top:4px;"),
+                                    downloadButton(ns("corr_dl_pdf"), "Download PDF",
+                                        class = "btn-outline-secondary btn-sm",
+                                        style = "width:100%; margin-top:4px;")
+                                )
+                            ),
+                            column(9,
+                                imageOutput(ns("corr_heatmap"), width = "100%", height = "auto")
+                            )
+                        )
                     )
                 )
             )
@@ -357,16 +392,209 @@ mod_qc_server <- function(id, app_data) {
             }
         )
 
-        output$corr_heatmap <- renderImage({
-            img_path <- normalizePath(data()$qc_heatmap_path, mustWork = FALSE)
-            if (!file.exists(img_path)) {
-                list(src = "", alt = "Correlation heatmap not available",
-                     style = "display:none")
-            } else {
-                list(src = img_path, contentType = "image/png",
-                     alt = "Sample correlation heatmap",
-                     style = "max-width:100%; height:auto;")
+        # ---- Correlation heatmap ----------------------------------------------
+        # The pre-rendered pipeline PNG is shown by default (no computation).
+        # The heatmap is only recomputed after the user presses Apply.
+        corr_selected <- reactiveVal(NULL)
+        corr_applied  <- reactiveVal(FALSE)
+
+        output$corr_norm_group_ui <- renderUI({
+            ss <- data()$samplesheet
+            req(nrow(ss) > 0)
+            if (!"norm_group" %in% colnames(ss)) return(NULL)
+            groups <- unique(ss$norm_group)
+            if (length(groups) <= 1) return(NULL)
+            selectInput(session$ns("corr_norm_group"), "Norm group:",
+                choices  = c("All" = "all", setNames(groups, groups)),
+                selected = "all",
+                width    = "100%"
+            )
+        })
+
+        observe({
+            vst <- data()$vst
+            ss  <- data()$samplesheet
+            if (nrow(vst) == 0 || nrow(ss) == 0) return()
+            all_samps <- intersect(ss$sample, colnames(vst))
+            updateSelectizeInput(session, "corr_samples",
+                                 choices = all_samps, selected = all_samps,
+                                 server = TRUE)
+            if (is.null(corr_selected())) corr_selected(all_samps)
+        })
+
+        # Selecting a norm group rewrites the candidate sample list; the heatmap
+        # is only recomputed when the user presses Apply.
+        observeEvent(input$corr_norm_group, {
+            vst <- data()$vst
+            ss  <- data()$samplesheet
+            if (nrow(vst) == 0 || nrow(ss) == 0) return()
+            all_samps <- intersect(ss$sample, colnames(vst))
+            grp <- input$corr_norm_group %||% "all"
+            grp_samps <- if (grp != "all" && "norm_group" %in% colnames(ss))
+                intersect(ss$sample[ss$norm_group == grp], all_samps)
+            else
+                all_samps
+            updateSelectizeInput(session, "corr_samples",
+                                 choices = grp_samps, selected = grp_samps,
+                                 server = TRUE)
+        }, ignoreInit = TRUE)
+
+        observeEvent(input$corr_apply, {
+            sel <- input$corr_samples
+            if (is.null(sel) || length(intersect(sel, colnames(data()$vst))) < 2) {
+                showNotification("Select at least 2 samples to compute the heatmap.",
+                                 type = "warning")
+                return()
             }
+            if (!requireNamespace("pheatmap", quietly = TRUE)) {
+                showNotification("pheatmap is not installed; showing the pipeline heatmap.",
+                                 type = "error")
+                return()
+            }
+            corr_selected(sel)
+            corr_applied(TRUE)
+        })
+
+        observeEvent(input$corr_reset, {
+            vst <- data()$vst
+            ss  <- data()$samplesheet
+            all_samps <- intersect(ss$sample, colnames(vst))
+            if ("norm_group" %in% colnames(ss) && length(unique(ss$norm_group)) > 1)
+                updateSelectInput(session, "corr_norm_group", selected = "all")
+            updateSelectizeInput(session, "corr_samples", choices = all_samps,
+                                 selected = all_samps, server = TRUE)
+            corr_selected(all_samps)
+            corr_applied(FALSE)
+        })
+
+        # Sample-sample Pearson correlation heatmap on the blind VST.
+        # Returns TRUE on success, FALSE when fewer than 2 samples are available.
+        draw_corr_heatmap <- function(samples, filename = NA_character_) {
+            vst <- data()$vst
+            ss  <- data()$samplesheet
+            sample_cols <- intersect(samples, colnames(vst))
+            if (length(sample_cols) < 2) return(FALSE)
+
+            vst_mat <- as.matrix(vst[, sample_cols, drop = FALSE])
+            storage.mode(vst_mat) <- "double"
+            cor_mat <- cor(vst_mat, method = "pearson")
+
+            ann <- data.frame(
+                condition = ss$condition[match(sample_cols, ss$sample)],
+                row.names = sample_cols
+            )
+            if ("batch" %in% colnames(ss))
+                ann$batch <- ss$batch[match(sample_cols, ss$sample)]
+
+            conds <- unique(ss$condition)
+            n_pal <- max(3, min(length(conds), 9))
+            cond_colours <- setNames(
+                colorRampPalette(RColorBrewer::brewer.pal(n_pal, "Set1"))(length(conds)),
+                conds
+            )
+
+            col_fun <- colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdYlBu")))(100)
+            finite_cors <- cor_mat[is.finite(cor_mat)]
+            lo <- if (length(finite_cors) > 0) min(finite_cors) else 0
+            brks <- seq(lo, 1, length.out = 101)
+            if (lo >= 1) brks <- seq(0, 1, length.out = 101)
+
+            args <- list(
+                mat               = cor_mat,
+                annotation_col    = ann,
+                annotation_row    = ann,
+                annotation_colors = list(condition = cond_colours),
+                color             = col_fun,
+                breaks            = brks,
+                show_rownames     = TRUE,
+                show_colnames     = TRUE,
+                fontsize          = 8,
+                main              = "Sample-sample Pearson correlation (VST)"
+            )
+
+            if (is.na(filename)) {
+                do.call(pheatmap::pheatmap, args)
+            } else {
+                ext <- tolower(tools::file_ext(filename))
+                if (ext == "pdf") {
+                    grDevices::pdf(filename, width = 9, height = 8)
+                } else {
+                    grDevices::png(filename, width = 900, height = 800, res = 100)
+                }
+                on.exit(grDevices::dev.off(), add = TRUE)
+                do.call(pheatmap::pheatmap, args)
+            }
+            TRUE
+        }
+
+        # Helper: all samples present in both the samplesheet and the VST matrix.
+        corr_all_samples <- function() {
+            intersect(data()$samplesheet$sample, colnames(data()$vst))
+        }
+
+        output$corr_heatmap <- renderImage({
+            # Default: serve the pre-rendered pipeline PNG (no computation).
+            if (!isTRUE(corr_applied())) {
+                img_path <- normalizePath(data()$qc_heatmap_path, mustWork = FALSE)
+                if (!file.exists(img_path))
+                    return(list(src = "", alt = "Correlation heatmap not available",
+                                style = "display:none"))
+                return(list(src = img_path, contentType = "image/png",
+                            alt = "Sample correlation heatmap",
+                            style = "max-width:100%; height:auto;"))
+            }
+
+            tmp <- tempfile(fileext = ".png")
+            ok  <- draw_corr_heatmap(corr_selected(), filename = tmp)
+            if (!isTRUE(ok))
+                return(list(src = "", alt = "Select at least 2 samples",
+                            style = "display:none"))
+            list(src = tmp, contentType = "image/png",
+                 alt = "Sample correlation heatmap (recomputed)",
+                 style = "max-width:100%; height:auto;")
         }, deleteFile = FALSE)
+
+        output$corr_dl_png <- downloadHandler(
+            filename = function() {
+                if (isTRUE(corr_applied())) "correlation_heatmap_dashboard.png"
+                else "qc_correlation_heatmap.png"
+            },
+            content = function(file) {
+                if (isTRUE(corr_applied())) {
+                    req(draw_corr_heatmap(corr_selected(), filename = file))
+                    return(invisible(NULL))
+                }
+                src <- normalizePath(data()$qc_heatmap_path, mustWork = FALSE)
+                if (file.exists(src)) {
+                    file.copy(src, file, overwrite = TRUE)
+                } else {
+                    req(requireNamespace("pheatmap", quietly = TRUE))
+                    req(draw_corr_heatmap(corr_all_samples(), filename = file))
+                }
+            }
+        )
+
+        output$corr_dl_pdf <- downloadHandler(
+            filename = function() {
+                if (isTRUE(corr_applied())) "correlation_heatmap_dashboard.pdf"
+                else "qc_correlation_heatmap.pdf"
+            },
+            content = function(file) {
+                if (isTRUE(corr_applied())) {
+                    req(draw_corr_heatmap(corr_selected(), filename = file))
+                    return(invisible(NULL))
+                }
+                src <- normalizePath(
+                    file.path(data()$qc_basedir, "qc_correlation_heatmap.pdf"),
+                    mustWork = FALSE
+                )
+                if (file.exists(src)) {
+                    file.copy(src, file, overwrite = TRUE)
+                } else {
+                    req(requireNamespace("pheatmap", quietly = TRUE))
+                    req(draw_corr_heatmap(corr_all_samples(), filename = file))
+                }
+            }
+        )
     })
 }

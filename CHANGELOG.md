@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - QC PCA is now also produced per `norm_group` (`qc_pca_<norm_group>.{pdf,png}`) alongside the global `qc_pca_all.{pdf,png}`.
 - Dashboard QC > PCA: default colouring by sample name, a `norm_group` selector, and PNG/PDF download buttons.
+- Dashboard QC > Correlation Heatmap: sample/`norm_group` selection with on-demand recompute (pre-rendered pipeline image shown by default) and PNG/PDF downloads.
 - Initial pipeline implementation (v1.0.0-dev)
 - INPUT_CHECK module: samplesheet and contrasts validation
 - DESEQ2_QC module: library sizes, PCA, correlation heatmap, dispersion
