@@ -29,7 +29,9 @@ nextflow_pipeline {
             // QC outputs
             assert path("${params.outdir}/qc/qc_metrics.csv").exists()
             assert path("${params.outdir}/qc/qc_library_sizes.pdf").exists()
-            assert path("${params.outdir}/qc/qc_pca.pdf").exists()
+            assert path("${params.outdir}/qc/qc_pca_all.pdf").exists()
+            assert path("${params.outdir}/qc/qc_pca_CellLine_A.pdf").exists()
+            assert path("${params.outdir}/qc/qc_pca_CellLine_B.pdf").exists()
             assert path("${params.outdir}/qc/qc_correlation_heatmap.pdf").exists()
 
             // Normalization outputs

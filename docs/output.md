@@ -13,7 +13,8 @@ results/
 │   ├── qc_vst_matrix.tsv
 │   ├── qc_library_sizes.{pdf,png}
 │   ├── qc_count_distribution.{pdf,png}
-│   ├── qc_pca.{pdf,png}
+│   ├── qc_pca_all.{pdf,png}
+│   ├── qc_pca_<norm_group>.{pdf,png}
 │   ├── qc_correlation_heatmap.{pdf,png}
 │   └── qc_dispersion.{pdf,png}
 ├── normalization/
@@ -45,7 +46,8 @@ results/
 ### QC
 - `qc_metrics.csv` — library size, detected genes, size factors per sample.
 - `qc_vst_matrix.tsv` — blind VST-transformed counts (for exploratory visualisation).
-- `qc_pca.png` — PCA of all samples coloured by condition.
+- `qc_pca_all.png` — PCA of all samples coloured by sample name.
+- `qc_pca_<norm_group>.png` — PCA of the samples in each `norm_group`, coloured by sample name.
 - `qc_correlation_heatmap.png` — sample-sample Pearson correlation.
 
 ### Normalization

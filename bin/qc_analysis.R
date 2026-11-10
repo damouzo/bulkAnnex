@@ -134,27 +134,52 @@ save_plot(paste0(opt$prefix, "_count_distribution"), p_dist,
           width = max(8, n_samples * 0.4), height = 6)
 
 # ---- 3. PCA (VST) -----------------------------------------------------------
+# Colour by sample name so individual points are easy to locate.  Two kinds of
+# PCA plot are produced:
+#   qc_pca_all.{pdf,png}          — all samples together
+#   qc_pca_<norm_group>.{pdf,png} — one plot per norm_group (subset of samples)
+build_pca_plot <- function(sample_ids, title) {
+    mat <- t(vst_mat[, sample_ids, drop = FALSE])
+    res <- prcomp(mat, scale. = FALSE)
+    pct <- round(100 * res$sdev^2 / sum(res$sdev^2), 1)
+    df  <- as.data.frame(res$x[, 1:2, drop = FALSE])
+    df$sample <- rownames(df)
+    pal <- setNames(colorRampPalette(brewer.pal(8, "Dark2"))(nrow(df)), df$sample)
+
+    ggplot(df, aes(x = PC1, y = PC2, colour = sample)) +
+        geom_point(size = 3) +
+        scale_colour_manual(values = pal) +
+        labs(title  = title,
+             x      = paste0("PC1 (", pct[1], "%)"),
+             y      = paste0("PC2 (", pct[2], "%)"),
+             colour = "Sample") +
+        theme_bw(base_size = 11)
+}
+
 message("Plotting PCA...")
-pca_res   <- prcomp(t(vst_mat), scale. = FALSE)
-pct_var   <- round(100 * pca_res$sdev^2 / sum(pca_res$sdev^2), 1)
-pca_df    <- as.data.frame(pca_res$x[, 1:2])
-pca_df$sample    <- rownames(pca_df)
-pca_df$condition <- ss[pca_df$sample, "condition"]
-if (has_batch) pca_df$batch <- ss[pca_df$sample, "batch"]
+all_samples <- colnames(vst_mat)
 
-p_pca <- ggplot(pca_df, aes(x = PC1, y = PC2, colour = condition,
-                             label = sample,
-                             shape = if (has_batch) batch else NULL)) +
-    geom_point(size = 3) +
-    ggrepel::geom_text_repel(size = 2.5, max.overlaps = 20) +
-    scale_colour_manual(values = cond_colours) +
-    labs(title = "PCA — VST (blind)",
-         x = paste0("PC1 (", pct_var[1], "%)"),
-         y = paste0("PC2 (", pct_var[2], "%)"),
-         colour = "Condition", shape = if (has_batch) "Batch" else NULL) +
-    theme_bw(base_size = 11)
+# 3a. All samples coloured by sample name
+p_pca_all <- build_pca_plot(all_samples, "PCA — VST (blind)")
+save_plot(paste0(opt$prefix, "_pca_all"), p_pca_all, width = 8, height = 7)
 
-save_plot(paste0(opt$prefix, "_pca"), p_pca, width = 8, height = 7)
+# 3b. One PCA per norm_group. Skipped when a single global group ("all") is used,
+#     as that file would duplicate qc_pca_all.
+norm_groups <- unique(ss$norm_group)
+if (length(norm_groups) > 1 || (length(norm_groups) == 1 && norm_groups != "all")) {
+    for (grp in norm_groups) {
+        grp_samples <- intersect(ss$sample[ss$norm_group == grp], colnames(vst_mat))
+        if (length(grp_samples) < 2) {
+            warning(sprintf("Skipping PCA for norm_group '%s': fewer than 2 samples.",
+                            grp))
+            next
+        }
+        safe_grp <- gsub("[^A-Za-z0-9._-]", "_", grp)
+        if (safe_grp == "" || safe_grp == "all") safe_grp <- paste0(safe_grp, "group")
+        p_grp <- build_pca_plot(grp_samples, paste0("PCA — VST (blind) — ", grp))
+        save_plot(paste0(opt$prefix, "_pca_", safe_grp), p_grp, width = 8, height = 7)
+    }
+}
 
 # ---- 4. Sample-sample correlation heatmap -----------------------------------
 message("Plotting correlation heatmap...")

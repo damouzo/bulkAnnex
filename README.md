@@ -97,7 +97,7 @@ MNC_DDX41_Patient_vs_Healthy,condition,MNC_Healthy,MNC_DDX41_Patient,MNC
 ```
 
 - Each `norm_group` runs DESeq2 on its own samples only → dispersion estimated within-group.
-- QC (PCA, library sizes, correlation heatmap) always uses **all samples together** for a global overview.
+- QC (library sizes, correlation heatmap) always uses **all samples together** for a global overview; PCA is produced globally (`qc_pca_all`) and per `norm_group` (`qc_pca_<norm_group>`).
 - `dge/` and `gsea/` output directories remain flat — contrast IDs are unique across groups.
 - **Backward compatible**: omitting `norm_group` is equivalent to `norm_group = "all"` for every row; output structure is identical to previous runs.
 

@@ -39,7 +39,7 @@ MNC_DDX41_Patient_vs_Healthy,condition,MNC_Healthy,MNC_DDX41_Patient,MNC
 When an experiment mixes biologically distinct sample types (e.g. cell lines and primary patient cells), a single global DESeq2 model can distort dispersion estimates. Adding `norm_group` runs one independent DESeq2 normalisation per group:
 
 - Each `norm_group` runs DESeq2 on its own samples only.
-- QC (PCA, library sizes, heatmap) always uses **all samples together**.
+- QC (library sizes, heatmap) always uses **all samples together**; PCA is produced both globally (`qc_pca_all`) and per `norm_group` (`qc_pca_<norm_group>`).
 - `dge/` and `gsea/` output directories remain flat — contrast IDs are globally unique.
 - Omitting `norm_group` is fully backward compatible (equivalent to `norm_group = all`).
 

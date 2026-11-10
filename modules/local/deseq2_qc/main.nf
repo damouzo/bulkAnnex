@@ -18,7 +18,7 @@ process DESEQ2_QC {
     path 'qc_metrics.csv',                 emit: metrics
     path 'qc_library_sizes.{pdf,png}',     emit: library_sizes
     path 'qc_count_distribution.{pdf,png}',emit: count_distribution
-    path 'qc_pca.{pdf,png}',              emit: pca
+    path 'qc_pca_*.{pdf,png}',            emit: pca
     path 'qc_correlation_heatmap.{pdf,png}', emit: correlation_heatmap
     path 'qc_dispersion.{pdf,png}',        emit: dispersion
     path 'versions.yml',                   emit: versions
