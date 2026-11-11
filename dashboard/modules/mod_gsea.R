@@ -72,6 +72,57 @@ mod_gsea_server <- function(id, app_data) {
                 ),
                 nav_panel("Results Table",
                     DTOutput(ns("results_table"))
+                ),
+                nav_panel("Common GSEA",
+                    fluidRow(
+                        column(3,
+                            card(
+                                card_header("Parameters"),
+                                selectInput(ns("cg_db"), "Database",
+                                            choices = c("GO" = "go", "KEGG" = "kegg",
+                                                        "Reactome" = "reactome"),
+                                            selected = "go"),
+                                conditionalPanel(
+                                    condition = sprintf("input['%s'] == 'go'", ns("cg_db")),
+                                    selectInput(ns("cg_go_ont"), "GO Ontology",
+                                                choices = c("BP" = "BP", "MF" = "MF", "CC" = "CC"),
+                                                selected = "BP")
+                                ),
+                                numericInput(ns("cg_padj"), "adj.p cutoff",
+                                             value = 0.05, min = 0.001, max = 0.5, step = 0.001),
+                                radioButtons(ns("cg_type"), "Plot type",
+                                             choices = c("Venn Diagram" = "venn",
+                                                         "UpSet Plot"   = "upset",
+                                                         "Heatmap"      = "heatmap"),
+                                             selected = "venn"),
+                                conditionalPanel(
+                                    condition = sprintf("input['%s'] == 'heatmap'", ns("cg_type")),
+                                    selectInput(ns("cg_rowlabels"), "Heatmap row labels",
+                                                choices = c("Description (truncated)" = "desc",
+                                                            "ID"                      = "id",
+                                                            "None"                    = "none"),
+                                                selected = "desc")
+                                ),
+                                hr(),
+                                strong("Contrasts to compare"),
+                                uiOutput(ns("cg_contrast_check_ui")),
+                                hr(),
+                                actionButton(ns("cg_apply"), "Apply Changes",
+                                             class = "btn-primary w-100", icon = icon("play")),
+                                downloadButton(ns("cg_download_png"), "Download PNG",
+                                               class = "btn-outline-secondary w-100 mt-2"),
+                                downloadButton(ns("cg_download_pdf"), "Download PDF",
+                                               class = "btn-outline-secondary w-100 mt-2"),
+                                uiOutput(ns("cg_warn"))
+                            )
+                        ),
+                        column(9,
+                            card(
+                                card_header("Common GSEA"),
+                                plotOutput(ns("cg_plot"), height = "620px")
+                            )
+                        )
+                    )
                 )
             )
 
@@ -426,6 +477,228 @@ mod_gsea_server <- function(id, app_data) {
                       escape      = FALSE,
                       class       = "compact stripe")
         })
+
+        # =====================================================================
+        # COMMON GSEA — cross-contrast pathway comparison (Venn / UpSet / Heatmap)
+        # Compares significant pathways (by ID, value = NES) across contrasts,
+        # independently of the global Settings selectors above.
+        # =====================================================================
+        cg_pkgs_ok <- all(sapply(
+            c("ggVennDiagram", "ComplexUpset", "ComplexHeatmap", "circlize"),
+            requireNamespace, quietly = TRUE
+        ))
+
+        # ---- Populate contrast checkboxes -----------------------------------
+        output$cg_contrast_check_ui <- renderUI({
+            ns <- session$ns
+            cids <- unique(unlist(lapply(data()$gsea, names)))
+            if (length(cids) == 0) cids <- names(data()$dge)
+            if (length(cids) == 0) {
+                return(p("No GSEA results available.", style = "color:grey;font-size:0.9em;"))
+            }
+            checkboxGroupInput(ns("cg_contrasts"), label = NULL, choices = cids, selected = cids)
+        })
+
+        output$cg_warn <- renderUI({
+            req(input$cg_type == "venn")
+            n <- length(input$cg_contrasts)
+            if (!is.null(n) && n > 5) {
+                div(class = "alert alert-warning mt-2", style = "font-size:0.83em; padding:8px;",
+                    tags$strong("\u26a0 Too many contrasts for a Venn Diagram (max 5)."),
+                    tags$br(),
+                    "Please select \u22645 contrasts or switch to UpSet Plot.")
+            }
+        })
+
+        # Normalise a GSEA CSV data.frame to canonical columns.
+        cg_normalise_df <- function(df, db, ont) {
+            if (is.null(df) || nrow(df) == 0) return(NULL)
+            if (!"padj" %in% colnames(df) && "p.adjust" %in% colnames(df)) df$padj <- df$p.adjust
+            if (!"padj" %in% colnames(df) && "pval"     %in% colnames(df)) df$padj <- p.adjust(df$pval, method = "BH")
+            if (!"ID"   %in% colnames(df)) df$ID <- df$Description
+            if (!"NES"  %in% colnames(df)) df$NES <- NA_real_
+            if (db == "go" && "ontology" %in% colnames(df)) {
+                df <- df[toupper(df$ontology) == ont, , drop = FALSE]
+            }
+            df
+        }
+
+        cg_sets <- eventReactive(input$cg_apply, {
+            db       <- input$cg_db %||% "go"
+            ont      <- toupper(input$cg_go_ont %||% "BP")
+            padj_thr <- input$cg_padj %||% 0.05
+            selected <- input$cg_contrasts
+            validate(need(length(selected) >= 2,
+                          "Please select at least 2 contrasts to compare."))
+
+            base <- data()$gsea[[db]]
+            if (is.null(base)) base <- list()
+
+            dfs <- setNames(lapply(selected, function(cid) {
+                df <- cg_normalise_df(base[[cid]], db, ont)
+                if (is.null(df)) return(NULL)
+                df[!is.na(df$padj) & df$padj < padj_thr, , drop = FALSE]
+            }), selected)
+
+            sets <- lapply(dfs, function(d) if (is.null(d) || nrow(d) == 0) character(0) else unique(d$ID))
+
+            all_df <- do.call(rbind, lapply(dfs, function(d) {
+                if (is.null(d) || nrow(d) == 0) return(NULL)
+                d[, c("ID", "Description"), drop = FALSE]
+            }))
+            labels <- if (!is.null(all_df) && nrow(all_df) > 0) {
+                all_df <- all_df[!duplicated(all_df$ID), , drop = FALSE]
+                setNames(all_df$Description, all_df$ID)
+            } else character(0)
+
+            list(sets = sets, labels = labels, dfs = dfs, db = db, ont = ont)
+        }, ignoreNULL = FALSE)
+
+        cg_trunc <- function(x, n = 45) {
+            ifelse(is.na(x), "", ifelse(nchar(x) > n, paste0(substr(x, 1, n - 3), "..."), x))
+        }
+
+        cg_draw_venn <- function(sets) {
+            if (length(sets) > 5) {
+                grid::grid.text("Too many contrasts for a Venn Diagram (max 5).",
+                                gp = grid::gpar(fontsize = 12, col = "firebrick"))
+                return(invisible(NULL))
+            }
+            if (all(lengths(sets) == 0)) {
+                grid::grid.text("No significant pathways found.",
+                                gp = grid::gpar(fontsize = 12, col = "grey50"))
+                return(invisible(NULL))
+            }
+            p <- ggVennDiagram::ggVennDiagram(
+                    sets, label = "both", set_color = rep("black", length(sets))) +
+                ggplot2::scale_fill_gradient(low = "white", high = "#4d9221") +
+                ggplot2::scale_color_manual(values = rep("black", length(sets))) +
+                ggplot2::ggtitle("Common GSEA pathways") +
+                ggplot2::theme(
+                    legend.position = "none",
+                    text = ggplot2::element_text(color = "black"),
+                    plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 13),
+                    plot.margin = ggplot2::margin(16, 36, 16, 36, unit = "pt")) +
+                ggplot2::coord_cartesian(clip = "off")
+            print(p)
+        }
+
+        cg_draw_upset <- function(sets) {
+            all_paths <- unique(unlist(sets))
+            if (length(all_paths) == 0) {
+                grid::grid.text("No significant pathways found.",
+                                gp = grid::gpar(fontsize = 12, col = "grey50"))
+                return(invisible(NULL))
+            }
+            mat <- as.data.frame(
+                sapply(names(sets), function(cid) all_paths %in% sets[[cid]]),
+                stringsAsFactors = FALSE)
+            mat[] <- lapply(mat, as.logical)
+            p <- ComplexUpset::upset(
+                    mat, intersect = names(sets), name = "Contrast",
+                    set_sizes = ComplexUpset::upset_set_size(geom = ggplot2::geom_bar(fill = "#4d9221")),
+                    width_ratio = 0.2, sort_intersections_by = "degree") +
+                ggplot2::ggtitle("Common GSEA pathways") +
+                ggplot2::theme(
+                    text = ggplot2::element_text(color = "black"),
+                    axis.text = ggplot2::element_text(color = "black"),
+                    plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 13))
+            print(p)
+        }
+
+        cg_draw_heatmap <- function(sets, labels, dfs, labels_mode) {
+            common <- Reduce(intersect, sets)
+            if (length(common) < 2) {
+                grid::grid.text(
+                    paste0("No pathways significant in ALL selected contrasts (n = ",
+                           length(common), ")."),
+                    gp = grid::gpar(fontsize = 12, col = "grey50"))
+                return(invisible(NULL))
+            }
+            nes_mat <- sapply(names(dfs), function(cid) {
+                d <- dfs[[cid]]
+                if (is.null(d) || nrow(d) == 0) return(rep(NA_real_, length(common)))
+                setNames(d$NES, d$ID)[common]
+            })
+            nes_mat <- as.matrix(nes_mat)
+            rownames(nes_mat) <- common
+
+            show_rn <- nrow(nes_mat) <= 50
+            if (labels_mode == "none") {
+                show_rn <- FALSE
+            } else if (labels_mode == "id") {
+                rownames(nes_mat) <- make.unique(common)
+            } else {
+                labs <- labels[common]
+                miss <- is.na(labs) | !nzchar(labs)
+                labs[miss] <- common[miss]
+                rownames(nes_mat) <- make.unique(cg_trunc(labs, 45))
+            }
+
+            lim     <- max(stats::quantile(abs(nes_mat), 0.98, na.rm = TRUE), 1e-6)
+            col_fun <- circlize::colorRamp2(c(-lim, 0, lim), c("#4575b4", "white", "#d73027"))
+            ht <- ComplexHeatmap::Heatmap(
+                nes_mat,
+                name               = "NES",
+                col                = col_fun,
+                na_col             = "#cccccc",
+                show_row_names     = show_rn,
+                row_names_gp       = grid::gpar(fontsize = 7),
+                row_names_max_width= grid::unit(7, "cm"),
+                column_names_gp    = grid::gpar(fontsize = 9),
+                cluster_rows       = TRUE,
+                cluster_columns    = FALSE,
+                column_title       = paste0("Common GSEA pathways (n = ", nrow(nes_mat),
+                                            " x ", ncol(nes_mat), " contrasts)"),
+                column_title_gp    = grid::gpar(fontsize = 12, fontface = "bold"),
+                heatmap_legend_param = list(title_gp  = grid::gpar(fontsize = 9),
+                                            labels_gp = grid::gpar(fontsize = 8))
+            )
+            ComplexHeatmap::draw(ht)
+        }
+
+        cg_render_plot <- function() {
+            if (!cg_pkgs_ok) {
+                grid::grid.text("Package(s) unavailable. Please rebuild the container.",
+                                gp = grid::gpar(fontsize = 12, col = "firebrick"))
+                return(invisible(NULL))
+            }
+            d <- cg_sets()
+            req(d)
+            if (length(d$sets) < 2) {
+                grid::grid.text("Select at least 2 contrasts.",
+                                gp = grid::gpar(fontsize = 13, col = "grey50"))
+                return(invisible(NULL))
+            }
+            type <- input$cg_type %||% "venn"
+            if (type == "venn") {
+                cg_draw_venn(d$sets)
+            } else if (type == "upset") {
+                cg_draw_upset(d$sets)
+            } else {
+                cg_draw_heatmap(d$sets, d$labels, d$dfs, input$cg_rowlabels %||% "desc")
+            }
+        }
+
+        output$cg_plot <- renderPlot({ cg_render_plot() })
+
+        output$cg_download_png <- downloadHandler(
+            filename = function() paste0("common_gsea_", input$cg_type %||% "plot", ".png"),
+            content  = function(file) {
+                png(file, width = 1600, height = 1200, res = 200)
+                on.exit(dev.off(), add = TRUE)
+                cg_render_plot()
+            }
+        )
+
+        output$cg_download_pdf <- downloadHandler(
+            filename = function() paste0("common_gsea_", input$cg_type %||% "plot", ".pdf"),
+            content  = function(file) {
+                pdf(file, width = 10, height = 8)
+                on.exit(dev.off(), add = TRUE)
+                cg_render_plot()
+            }
+        )
 
         # ---- Pathview (KEGG only) -------------------------------------------
         # Populate pathway dropdown when KEGG contrast changes.

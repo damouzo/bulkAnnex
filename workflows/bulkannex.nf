@@ -14,6 +14,7 @@ include { QC                    } from '../subworkflows/local/qc/main'
 include { DGE_GSEA              } from '../subworkflows/local/dge_gsea/main'
 include { GSEA_TREEDOT          } from '../modules/local/gsea_treedot/main'
 include { CONTRAST_COMPARISON   } from '../modules/local/contrast_comparison/main'
+include { CONTRAST_COMPARISON_GSEA } from '../modules/local/contrast_comparison_gsea/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -144,6 +145,20 @@ workflow BULKANNEX {
                 .collect()
         )
         ch_versions = ch_versions.mix(CONTRAST_COMPARISON.out.versions)
+    }
+
+    // ---- 5d. Cross-contrast GSEA pathway comparison -------------------------
+    // Collects all GSEA CSVs (GO/KEGG/Reactome) into a single task that generates
+    // Venn diagrams, UpSet plots and NES heatmaps over enriched pathways.
+    // Skipped automatically by contrast_comparison_gsea.R if < 2 contrasts are present.
+    if (params.run_gsea && !params.skip_contrast_comparison) {
+        ch_gsea_csv = DGE_GSEA.out.gsea_go
+            .mix(DGE_GSEA.out.gsea_kegg, DGE_GSEA.out.gsea_reactome)
+            .map { _meta, csv -> csv }
+            .filter { it }   // drop empty optional outputs (e.g. KEGG offline)
+            .collect()
+        CONTRAST_COMPARISON_GSEA(ch_gsea_csv)
+        ch_versions = ch_versions.mix(CONTRAST_COMPARISON_GSEA.out.versions)
     }
 
     // ---- 6. Shiny dashboard -------------------------------------------------

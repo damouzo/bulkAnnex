@@ -1,7 +1,9 @@
 #!/usr/bin/env Rscript
 # contrast_comparison.R — Cross-contrast DEG comparison
 # Generates Venn diagrams, UpSet plots, and Log2FC Spearman correlation
-# heatmaps for UP- and DOWN-regulated DEGs across all contrasts.
+# heatmaps for UP- and DOWN-regulated DEGs across all contrasts, plus a
+# gene heatmap (log2FC) and a GO BP ORA dotplot over the genes that are DEG
+# in ALL contrasts (either direction).
 #
 # Input: all *_DESeq2_results.csv files staged in the Nextflow work directory.
 # Output: contrast_comparison_*.{pdf,png}, contrast_comparison_common_degs.csv,
@@ -16,13 +18,21 @@ suppressPackageStartupMessages({
     library(circlize)
     library(grid)
     library(dplyr)
+    library(clusterProfiler)
+    library(enrichplot)
+    library(org.Hs.eg.db)
+    library(org.Mm.eg.db)
 })
 
 option_list <- list(
     make_option("--padj", type = "double",  default = 0.05,
                 help = "Adjusted p-value threshold for DEG calls [default: %default]"),
     make_option("--lfc",  type = "double",  default = 0.5,
-                help = "Absolute log2FC threshold for DEG calls [default: %default]")
+                help = "Absolute log2FC threshold for DEG calls [default: %default]"),
+    make_option("--organism", type = "character", default = "auto",
+                help = "Organism: human, mouse, or auto (detect from gene IDs) [default: %default]"),
+    make_option("--ora_topn", type = "integer", default = 10,
+                help = "Number of top GO BP terms in the ORA dotplot [default: %default]")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
@@ -280,8 +290,122 @@ if (!is.null(ht_down)) {
     save_plot(ht_down, "contrast_comparison_lfc_heatmap_down", width = 9, height = 8)
 }
 
+# ---- Common DEGs across ALL contrasts (significant in either direction) -----
+# Single set used by both the gene heatmap and the ORA dotplot: genes that are
+# DEG (padj < cutoff AND |log2FC| >= cutoff, up or down) in EVERY contrast.
+any_sets <- lapply(setNames(contrast_ids, contrast_ids), function(cid) {
+    unique(c(sets_up[[cid]], sets_down[[cid]]))
+})
+common_any <- if (length(any_sets) >= 2) Reduce(intersect, any_sets) else character(0)
+message("Common DEGs across all contrasts (any direction): ", length(common_any))
+
+# gene_id -> gene_name map (first occurrence across contrasts)
+gene_name_map_all <- local({
+    all_df <- bind_rows(lapply(dge_list, function(df) df[, c("gene_id", "gene_name"), drop = FALSE]))
+    all_df <- all_df[!duplicated(all_df$gene_id), ]
+    setNames(all_df$gene_name, all_df$gene_id)
+})
+
 # ============================================================
-# SECTION 4: Common DEGs summary CSV
+# SECTION 4: Common DEGs Gene Heatmap (log2FC across all contrasts)
+# ============================================================
+make_common_heatmap <- function(genes) {
+    if (length(genes) < 2) {
+        return(make_placeholder(paste0(
+            "Not enough common DEGs across all contrasts\n(n = ", length(genes), ").")))
+    }
+
+    # log2FC matrix: rows = common genes, cols = all contrasts
+    lfc_mat <- sapply(names(dge_list), function(cid) {
+        df  <- dge_list[[cid]]
+        vec <- setNames(df$log2FoldChange, df$gene_id)
+        vec[genes]
+    })
+    rownames(lfc_mat) <- genes
+
+    # Row labels: gene symbol if available, else gene_id
+    labs <- gene_name_map_all[genes]
+    miss <- is.na(labs) | !nzchar(labs)
+    labs[miss] <- genes[miss]
+    rownames(lfc_mat) <- make.unique(labs)
+
+    lim     <- max(stats::quantile(abs(lfc_mat), 0.98, na.rm = TRUE), 1e-6)
+    col_fun <- colorRamp2(c(-lim, 0, lim), c("#4575b4", "white", "#d73027"))
+
+    Heatmap(
+        lfc_mat,
+        name              = "log2FC",
+        col               = col_fun,
+        na_col            = "#cccccc",
+        show_row_names    = nrow(lfc_mat) <= 50,
+        row_names_gp      = gpar(fontsize = 7),
+        column_names_gp   = gpar(fontsize = 9),
+        cluster_rows      = TRUE,
+        cluster_columns   = FALSE,
+        column_title      = paste0("Common DEGs across all contrasts (n = ",
+                                   nrow(lfc_mat), " genes x ", ncol(lfc_mat), " contrasts)"),
+        column_title_gp   = gpar(fontsize = 13, fontface = "bold"),
+        heatmap_legend_param = list(title_gp  = gpar(fontsize = 10),
+                                    labels_gp = gpar(fontsize = 9))
+    )
+}
+
+message("\n--- Common DEGs Gene Heatmap ---")
+ht_common <- make_common_heatmap(common_any)
+save_plot(ht_common, "contrast_comparison_gene_heatmap_common", width = 8, height = 8)
+
+# ============================================================
+# SECTION 5: Common DEGs ORA (GO BP)
+# ============================================================
+detect_organism <- function(gene_ids) {
+    ids <- gene_ids[!is.na(gene_ids)]
+    if (length(ids) > 0 && any(grepl("^ENSMUSG", ids))) "org.Mm.eg.db" else "org.Hs.eg.db"
+}
+
+ora_org_str <- if (!is.null(opt$organism) && opt$organism %in% c("human", "mouse")) {
+    if (opt$organism == "human") "org.Hs.eg.db" else "org.Mm.eg.db"
+} else {
+    detect_organism(common_any)
+}
+message("ORA organism: ", ora_org_str)
+
+make_common_ora <- function(genes, top_n = 10) {
+    if (length(genes) < 2) {
+        return(make_placeholder(paste0(
+            "Not enough common DEGs across all contrasts\n(n = ", length(genes), ").")))
+    }
+    ego <- tryCatch(
+        enrichGO(gene          = genes,
+                 OrgDb         = get(ora_org_str),
+                 keyType       = "ENSEMBL",
+                 ont           = "BP",
+                 pvalueCutoff  = 1,
+                 qvalueCutoff  = 1,
+                 pAdjustMethod = "BH",
+                 minGSSize     = 5,
+                 maxGSSize     = 500,
+                 readable      = TRUE),
+        error = function(e) { message("enrichGO: ", e$message); NULL })
+
+    if (is.null(ego) || nrow(as.data.frame(ego)) == 0) {
+        return(make_placeholder(paste0(
+            "No GO BP terms enriched for the ", length(genes), " common DEGs.")))
+    }
+
+    enrichplot::dotplot(ego,
+                        showCategory = min(top_n, nrow(as.data.frame(ego))),
+                        title        = paste0("ORA GO BP - ", length(genes),
+                                              " common DEGs (all contrasts)")) +
+        theme_bw(base_size = 11) +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+}
+
+message("\n--- Common DEGs ORA (GO BP) ---")
+p_ora_common <- make_common_ora(common_any, top_n = opt$ora_topn)
+save_plot(p_ora_common, "contrast_comparison_ora_go_bp_common", width = 9, height = 7)
+
+# ============================================================
+# SECTION 6: Common DEGs summary CSV
 # ============================================================
 message("\n--- Common DEGs summary ---")
 
@@ -344,15 +468,20 @@ if ((length(common_up) + length(common_down)) > 0) {
 }
 
 # ============================================================
-# SECTION 5: versions.yml
+# SECTION 7: versions.yml
 # ============================================================
 versions_content <- c(
     "CONTRAST_COMPARISON:",
     paste0("    R: ", R.version$major, ".", R.version$minor),
     paste0("    ggVennDiagram: ", packageVersion("ggVennDiagram")),
-    paste0("    ComplexUpset: ",  packageVersion("ComplexUpset")),
+    paste0("    ComplexUpset:  ", packageVersion("ComplexUpset")),
     paste0("    ComplexHeatmap: ", packageVersion("ComplexHeatmap")),
+    paste0("    clusterProfiler: ", packageVersion("clusterProfiler")),
+    paste0("    enrichplot: ", packageVersion("enrichplot")),
+    paste0("    org_db: ", ora_org_str),
     paste0("    n_contrasts: ", length(dge_files)),
+    paste0("    n_common_genes: ", length(common_any)),
+    paste0("    ora_topn: ", opt$ora_topn),
     paste0("    padj_threshold: ", opt$padj),
     paste0("    lfc_threshold: ", opt$lfc)
 )
