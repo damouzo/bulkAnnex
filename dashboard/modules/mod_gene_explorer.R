@@ -14,16 +14,32 @@ mod_gene_explorer_ui <- function(id) {
                               placeholder = "e.g. TP53, ENSG00000141510"),
                     actionButton(ns("search_btn"), "Search", class = "btn-primary"),
                     hr(),
-                    uiOutput(ns("gene_selector_ui"))
+                    uiOutput(ns("gene_selector_ui")),
+                    selectizeInput(ns("selected_contrasts"), "Contrasts shown",
+                                   choices = NULL, multiple = TRUE,
+                                   options = list(plugins = list("remove_button"),
+                                                  placeholder = "All contrasts"))
                 )
             ),
             column(9,
                 navset_card_tab(
                     nav_panel("Expression across conditions",
-                        plotlyOutput(ns("expression_plot"), height = "450px")
+                        plotlyOutput(ns("expression_plot"), height = "450px"),
+                        div(class = "mt-2",
+                            downloadButton(ns("dl_expr_png"), "Download PNG",
+                                           class = "btn-outline-secondary btn-sm"),
+                            downloadButton(ns("dl_expr_pdf"), "Download PDF",
+                                           class = "btn-outline-secondary btn-sm")
+                        )
                     ),
                     nav_panel("DGE across contrasts",
                         plotlyOutput(ns("dge_lfc_plot"), height = "400px"),
+                        div(class = "mt-2",
+                            downloadButton(ns("dl_dge_png"), "Download PNG",
+                                           class = "btn-outline-secondary btn-sm"),
+                            downloadButton(ns("dl_dge_pdf"), "Download PDF",
+                                           class = "btn-outline-secondary btn-sm")
+                        ),
                         DTOutput(ns("dge_results_table"))
                     ),
                     nav_panel("GSEA membership",
@@ -65,6 +81,35 @@ mod_gene_explorer_server <- function(id, app_data) {
             selectInput(ns("selected_gene"), "Select gene", choices = choices)
         })
 
+        # ---- Contrast selector --------------------------------------------------
+        # Populated from the available DGE contrasts. Defaults to all selected so
+        # the sub-tabs behave exactly as before until the user narrows the set.
+        observe({
+            all_c <- names(data()$dge)
+            updateSelectizeInput(session, "selected_contrasts",
+                                 choices = all_c, selected = all_c)
+        })
+
+        # Active contrasts. An empty selection yields character(0) so the
+        # sub-tabs can show a "no contrasts selected" notice.
+        active_contrasts <- reactive({
+            all_c <- names(data()$dge)
+            sel   <- input$selected_contrasts
+            if (is.null(sel)) all_c else intersect(all_c, sel)
+        })
+
+        # Conditions implied by the selected contrasts (via contrasts_meta).
+        # NULL means "cannot filter" (legacy runs without contrasts_meta) and the
+        # expression plot shows every condition.
+        active_conditions <- reactive({
+            cm  <- data()$contrasts_meta
+            sel <- active_contrasts()
+            if (is.null(cm) || nrow(cm) == 0) return(NULL)
+            rows <- cm[cm$contrast_id %in% sel, , drop = FALSE]
+            if (nrow(rows) == 0) return(NULL)
+            unique(c(rows$reference, rows$treatment))
+        })
+
         # Expression data for selected gene
         gene_expr <- reactive({
             req(input$selected_gene)
@@ -88,11 +133,35 @@ mod_gene_explorer_server <- function(id, app_data) {
             df
         })
 
-        output$expression_plot <- renderPlotly({
+        # Expression data filtered by the active contrasts' conditions.
+        gene_expr_filtered <- reactive({
             df <- gene_expr()
-            if (is.null(df)) return(plot_ly() %>% layout(title = "No gene selected"))
+            if (is.null(df)) return(NULL)
+            conds <- active_conditions()
+            if (!is.null(conds)) df <- df[df$condition %in% conds, , drop = FALSE]
+            df
+        })
 
-            gene_name <- data()$vst$gene_name[data()$vst$gene_id == input$selected_gene][1]
+        selected_gene_name <- reactive({
+            req(input$selected_gene)
+            data()$vst$gene_name[data()$vst$gene_id == input$selected_gene][1]
+        })
+
+        # Safe label for download filenames — never errors when no gene is selected.
+        gene_label <- function() {
+            g <- tryCatch(selected_gene_name(), error = function(e) NULL)
+            if (is.null(g) || length(g) == 0 || is.na(g) || !nzchar(g)) "gene" else g
+        }
+
+        output$expression_plot <- renderPlotly({
+            if (length(active_contrasts()) == 0)
+                return(plot_ly() %>% layout(title = "No contrasts selected"))
+            df <- gene_expr_filtered()
+            if (is.null(df)) return(plot_ly() %>% layout(title = "No gene selected"))
+            if (nrow(df) == 0)
+                return(plot_ly() %>% layout(title = "No conditions for the selected contrasts"))
+
+            gene_name <- selected_gene_name()
             title_str <- paste0(gene_name, " — VST expression")
 
             # Jittered dot + boxplot
@@ -115,15 +184,46 @@ mod_gene_explorer_server <- function(id, app_data) {
                 )
         })
 
-        output$dge_lfc_plot <- renderPlotly({
+        # ggplot equivalent of the expression boxplot for PNG/PDF export.
+        build_expression_ggplot <- function(df, gene_name) {
+            ggplot2::ggplot(df, ggplot2::aes(x = condition, y = vst_expr)) +
+                ggplot2::geom_boxplot(outlier.shape = NA, width = 0.6) +
+                ggplot2::geom_jitter(width = 0.15, height = 0, size = 2,
+                                     alpha = 0.8, colour = "#6F42C1") +
+                ggplot2::labs(title = paste0(gene_name, " \u2014 VST expression"),
+                              x = "Condition", y = "VST expression") +
+                ggplot2::theme_bw(base_size = 11)
+        }
+
+        output$dl_expr_png <- downloadHandler(
+            filename = function() paste0(gene_label(), "_expression.png"),
+            content  = function(file) {
+                df <- gene_expr_filtered()
+                req(df, nrow(df) > 0)
+                ggplot2::ggsave(file, build_expression_ggplot(df, selected_gene_name()),
+                                device = "png", width = 8, height = 6, dpi = 300, bg = "white")
+            }
+        )
+
+        output$dl_expr_pdf <- downloadHandler(
+            filename = function() paste0(gene_label(), "_expression.pdf"),
+            content  = function(file) {
+                df <- gene_expr_filtered()
+                req(df, nrow(df) > 0)
+                ggplot2::ggsave(file, build_expression_ggplot(df, selected_gene_name()),
+                                device = "pdf", width = 8, height = 6, bg = "white")
+            }
+        )
+
+        # Per-contrast log2FC for the selected gene (shared by plot and exports).
+        dge_lfc_data <- reactive({
             req(input$selected_gene)
             dge_list <- data()$dge
-            if (length(dge_list) == 0) return(plot_ly() %>% layout(title = "No DGE data"))
+            cids     <- active_contrasts()
+            if (length(dge_list) == 0 || length(cids) == 0) return(NULL)
 
-            gene_name <- data()$vst$gene_name[data()$vst$gene_id == input$selected_gene][1]
-
-            lfc_df <- do.call(rbind, lapply(names(dge_list), function(cid) {
-                df <- dge_list[[cid]]
+            lfc_df <- do.call(rbind, lapply(cids, function(cid) {
+                df  <- dge_list[[cid]]
                 row <- df[df$gene_id == input$selected_gene, , drop = FALSE]
                 if (nrow(row) == 0) return(NULL)
                 data.frame(
@@ -134,12 +234,22 @@ mod_gene_explorer_server <- function(id, app_data) {
                 )
             }))
 
-            if (is.null(lfc_df) || nrow(lfc_df) == 0) {
-                return(plot_ly() %>% layout(title = "Gene not found in DGE results"))
-            }
+            if (is.null(lfc_df) || nrow(lfc_df) == 0) return(NULL)
 
             lfc_df$sig   <- lfc_df$padj < 0.05 & !is.na(lfc_df$padj)
             lfc_df$color <- ifelse(lfc_df$sig, ifelse(lfc_df$lfc > 0, "#d73027", "#4575b4"), "#bbbbbb")
+            lfc_df
+        })
+
+        output$dge_lfc_plot <- renderPlotly({
+            req(input$selected_gene)
+            if (length(active_contrasts()) == 0)
+                return(plot_ly() %>% layout(title = "No contrasts selected"))
+            lfc_df <- dge_lfc_data()
+            if (is.null(lfc_df))
+                return(plot_ly() %>% layout(title = "Gene not found in DGE results"))
+
+            gene_name <- selected_gene_name()
 
             plot_ly(lfc_df,
                     x    = ~lfc,
@@ -159,11 +269,45 @@ mod_gene_explorer_server <- function(id, app_data) {
                 )
         })
 
+        # ggplot equivalent of the log2FC bar chart for PNG/PDF export.
+        build_dge_lfc_ggplot <- function(lfc_df, gene_name) {
+            lfc_df$contrast <- factor(lfc_df$contrast,
+                                      levels = lfc_df$contrast[order(lfc_df$lfc)])
+            ggplot2::ggplot(lfc_df, ggplot2::aes(x = lfc, y = contrast, fill = color)) +
+                ggplot2::geom_col() +
+                ggplot2::scale_fill_identity() +
+                ggplot2::geom_vline(xintercept = 0, colour = "black") +
+                ggplot2::labs(title = paste0(gene_name, " \u2014 log2FC across contrasts"),
+                              x = "log2 Fold Change", y = NULL) +
+                ggplot2::theme_bw(base_size = 11)
+        }
+
+        output$dl_dge_png <- downloadHandler(
+            filename = function() paste0(gene_label(), "_log2FC.png"),
+            content  = function(file) {
+                lfc_df <- dge_lfc_data()
+                req(lfc_df)
+                ggplot2::ggsave(file, build_dge_lfc_ggplot(lfc_df, selected_gene_name()),
+                                device = "png", width = 8, height = 6, dpi = 300, bg = "white")
+            }
+        )
+
+        output$dl_dge_pdf <- downloadHandler(
+            filename = function() paste0(gene_label(), "_log2FC.pdf"),
+            content  = function(file) {
+                lfc_df <- dge_lfc_data()
+                req(lfc_df)
+                ggplot2::ggsave(file, build_dge_lfc_ggplot(lfc_df, selected_gene_name()),
+                                device = "pdf", width = 8, height = 6, bg = "white")
+            }
+        )
+
         output$dge_results_table <- renderDT({
             req(input$selected_gene)
             dge_list <- data()$dge
-            all_rows <- do.call(rbind, lapply(names(dge_list), function(cid) {
-                df <- dge_list[[cid]]
+            cids     <- active_contrasts()
+            all_rows <- do.call(rbind, lapply(cids, function(cid) {
+                df  <- dge_list[[cid]]
                 row <- df[df$gene_id == input$selected_gene, , drop = FALSE]
                 if (nrow(row) == 0) return(NULL)
                 cbind(contrast = cid, row[, c("gene_name", "baseMean",
@@ -184,9 +328,11 @@ mod_gene_explorer_server <- function(id, app_data) {
             gene_name <- data()$vst$gene_name[data()$vst$gene_id == gene_id][1]
 
             gsea_data <- data()$gsea
+            active    <- active_contrasts()
             rows <- lapply(names(gsea_data), function(db) {
                 db_data <- gsea_data[[db]]
-                lapply(names(db_data), function(cid) {
+                cids    <- intersect(names(db_data), active)
+                lapply(cids, function(cid) {
                     df <- db_data[[cid]]
                     if (is.null(df) || nrow(df) == 0) return(NULL)
 
