@@ -259,6 +259,13 @@ get_contrast_norm_group <- function(contrasts_meta, contrast_id) {
     if (length(hit) == 0 || is.na(hit[1])) "all" else hit[1]
 }
 
+# Helper: infer the organism OrgDb from Ensembl gene-ID prefixes.
+# ENSMUSG* -> mouse; everything else defaults to human.
+detect_organism <- function(gene_ids) {
+    ids <- gene_ids[!is.na(gene_ids)]
+    if (length(ids) > 0 && any(grepl("^ENSMUSG", ids))) "org.Mm.eg.db" else "org.Hs.eg.db"
+}
+
 # Helper: return named vector of pathview PNGs for a contrast.
 # Names are pathway IDs (e.g., "hsa04110"), values are full file paths.
 get_pathview_files <- function(results_dir, contrast) {

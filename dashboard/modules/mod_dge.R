@@ -91,6 +91,8 @@ mod_dge_ui <- function(id) {
                                     radioButtons(ns("cmp_type"), "Plot type",
                                         choices  = c("Venn Diagram"       = "venn",
                                                      "UpSet Plot"         = "upset",
+                                                     "Gene Heatmap"       = "gene_heatmap",
+                                                     "ORA (GO BP)"        = "ora",
                                                      "Log2FC Correlation" = "heatmap"),
                                         selected = "upset"),
                                     hr(),
@@ -101,42 +103,17 @@ mod_dge_ui <- function(id) {
                                         value = 0.05, min = 0, max = 1, step = 0.01),
                                     numericInput(ns("cmp_lfc"), "|log2FC| \u2265",
                                         value = 0.5, min = 0, max = NA, step = 0.1),
+                                    uiOutput(ns("cmp_opts_ui")),
                                     hr(),
                                     actionButton(ns("cmp_apply"), "Apply Changes",
                                         class = "btn-primary w-100",
                                         icon  = icon("play")),
-                                    downloadButton(ns("cmp_download_up"), "Download UP image",
-                                        class = "btn-outline-secondary w-100 mt-2"),
-                                    downloadButton(ns("cmp_download_down"), "Download DOWN image",
-                                        class = "btn-outline-secondary w-100 mt-2"),
+                                    uiOutput(ns("cmp_download_ui")),
                                     uiOutput(ns("cmp_venn_warn"))
                                 )
                             ),
                             column(9,
-                                fluidRow(
-                                    column(12,
-                                        card(
-                                            card_header(
-                                                tags$strong("UP-regulated",
-                                                    style = "color:#d73027")
-                                            ),
-                                            plotOutput(ns("cmp_up"),
-                                                       height = "420px")
-                                        )
-                                    )
-                                ),
-                                fluidRow(
-                                    column(12,
-                                        card(
-                                            card_header(
-                                                tags$strong("DOWN-regulated",
-                                                    style = "color:#4575b4")
-                                            ),
-                                            plotOutput(ns("cmp_down"),
-                                                       height = "420px")
-                                        )
-                                    )
-                                )
+                                uiOutput(ns("cmp_main_ui"))
                             )
                         )
                     )
@@ -732,10 +709,23 @@ mod_dge_server <- function(id, app_data) {
                 })
             }
 
+            # Significant in EITHER direction, per contrast, then common to all.
+            any_sets <- lapply(setNames(selected, selected), function(cid) {
+                df <- dge_list[[cid]]
+                if (is.null(df) || nrow(df) == 0) return(character(0))
+                keep <- !is.na(df$padj) & df$padj < padj_thr &
+                        !is.na(df$log2FoldChange) & abs(df$log2FoldChange) >= lfc_thr
+                df$gene_id[keep]
+            })
+            common <- if (length(any_sets) >= 2) Reduce(intersect, any_sets) else character(0)
+
             list(
                 up       = get_sets("up"),
                 down     = get_sets("down"),
-                dge_full = dge_list[selected]
+                common   = common,
+                dge_full = dge_list[selected],
+                padj     = padj_thr,
+                lfc      = lfc_thr
             )
         }, ignoreNULL = FALSE)
 
@@ -915,6 +905,215 @@ mod_dge_server <- function(id, app_data) {
                 png(file, width = 1400, height = 900, res = 180)
                 on.exit(dev.off(), add = TRUE)
                 draw_common_plot(d$down, d$dge_full, "down", input$cmp_type %||% "upset")
+            }
+        )
+
+        # =====================================================================
+        # COMMON DEGs — Gene Heatmap & ORA (single plots over the common genes)
+        # =====================================================================
+
+        # Gene Heatmap: rows = genes DEG in ALL selected contrasts (either
+        # direction), columns = contrasts, cell = shrunken log2FC.
+        draw_gene_heatmap <- function(common_genes, dge_full, names_mode = "auto") {
+            if (!cmp_pkgs_ok) {
+                grid::grid.text("Package(s) unavailable. Please rebuild the container.",
+                                gp = grid::gpar(fontsize = 12, col = "firebrick"))
+                return(invisible(NULL))
+            }
+            if (length(common_genes) < 2 || length(dge_full) < 2) {
+                grid::grid.text(
+                    paste0("No genes are DEG in all selected contrasts (n = ",
+                           length(common_genes), ")."),
+                    gp = grid::gpar(fontsize = 12, col = "grey50"))
+                return(invisible(NULL))
+            }
+
+            lfc_mat <- sapply(names(dge_full), function(cid) {
+                df  <- dge_full[[cid]]
+                vec <- setNames(df$log2FoldChange, df$gene_id)
+                vec[common_genes]
+            })
+            rownames(lfc_mat) <- common_genes
+
+            # Row labels: gene symbol if available, else gene_id
+            gmap <- setNames(dge_full[[1]]$gene_name, dge_full[[1]]$gene_id)
+            labs <- gmap[common_genes]
+            miss <- is.na(labs) | !nzchar(labs)
+            labs[miss] <- common_genes[miss]
+            rownames(lfc_mat) <- make.unique(labs)
+
+            lim     <- max(stats::quantile(abs(lfc_mat), 0.98, na.rm = TRUE), 1e-6)
+            col_fun <- circlize::colorRamp2(c(-lim, 0, lim),
+                                            c("#4575b4", "white", "#d73027"))
+            show_rn <- switch(names_mode,
+                              always = TRUE,
+                              never  = FALSE,
+                              nrow(lfc_mat) <= 50)
+
+            ht <- ComplexHeatmap::Heatmap(
+                lfc_mat,
+                name              = "log2FC",
+                col               = col_fun,
+                na_col            = "#cccccc",
+                show_row_names    = show_rn,
+                row_names_gp      = grid::gpar(fontsize = 7),
+                column_names_gp   = grid::gpar(fontsize = 9),
+                cluster_rows      = TRUE,
+                cluster_columns   = FALSE,
+                column_title      = paste0("Common DEGs (n = ", nrow(lfc_mat),
+                                           " genes x ", ncol(lfc_mat), " contrasts)"),
+                column_title_gp   = grid::gpar(fontsize = 12, fontface = "bold"),
+                heatmap_legend_param = list(title_gp  = grid::gpar(fontsize = 9),
+                                            labels_gp = grid::gpar(fontsize = 8))
+            )
+            ComplexHeatmap::draw(ht)
+        }
+
+        # ORA (GO BP) dotplot over the same common genes. pvalueCutoff = 1 so
+        # the top pathways are shown even when none reach significance.
+        build_ora_plot <- function(common_genes, top_n = 5) {
+            placeholder <- function(msg) {
+                ggplot2::ggplot() +
+                    ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
+                                      size = 4, colour = "grey45") +
+                    ggplot2::theme_void()
+            }
+            if (length(common_genes) < 2) {
+                return(placeholder(paste0("No genes are DEG in all selected contrasts (n = ",
+                                          length(common_genes), ").")))
+            }
+            org_db <- get(detect_organism(common_genes))
+            ego <- tryCatch(
+                clusterProfiler::enrichGO(
+                    gene          = common_genes,
+                    OrgDb         = org_db,
+                    keyType       = "ENSEMBL",
+                    ont           = "BP",
+                    pvalueCutoff  = 1,
+                    qvalueCutoff  = 1,
+                    pAdjustMethod = "BH",
+                    minGSSize     = 5,
+                    maxGSSize     = 500,
+                    readable      = TRUE),
+                error = function(e) { message("enrichGO: ", e$message); NULL })
+            if (is.null(ego) || nrow(as.data.frame(ego)) == 0) {
+                return(placeholder(paste0("No GO BP terms enriched for the ",
+                                          length(common_genes), " common genes.")))
+            }
+            enrichplot::dotplot(
+                    ego,
+                    showCategory = min(top_n, nrow(as.data.frame(ego))),
+                    title        = paste0("ORA GO BP - ", length(common_genes),
+                                          " common DEGs")) +
+                ggplot2::theme_bw(base_size = 11) +
+                ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5,
+                                                                  face = "bold"))
+        }
+
+        # ---- Dynamic option controls (per plot type) ------------------------
+        output$cmp_opts_ui <- renderUI({
+            ns <- session$ns
+            if (identical(input$cmp_type, "gene_heatmap")) {
+                selectInput(ns("cmp_hm_names"), "Gene labels",
+                            choices  = c("Auto (\u226450 genes)" = "auto",
+                                         "Always"             = "always",
+                                         "Never"              = "never"),
+                            selected = "auto")
+            } else if (identical(input$cmp_type, "ora")) {
+                numericInput(ns("cmp_ora_topn"), "Top pathways",
+                             value = 5, min = 1, max = 20, step = 1)
+            }
+        })
+
+        # ---- Dynamic download buttons (per plot type) -----------------------
+        output$cmp_download_ui <- renderUI({
+            ns <- session$ns
+            if (input$cmp_type %in% c("gene_heatmap", "ora")) {
+                tagList(
+                    downloadButton(ns("cmp_download_png"), "Download PNG",
+                                   class = "btn-outline-secondary w-100 mt-2"),
+                    downloadButton(ns("cmp_download_pdf"), "Download PDF",
+                                   class = "btn-outline-secondary w-100 mt-2")
+                )
+            } else {
+                tagList(
+                    downloadButton(ns("cmp_download_up"), "Download UP image",
+                                   class = "btn-outline-secondary w-100 mt-2"),
+                    downloadButton(ns("cmp_download_down"), "Download DOWN image",
+                                   class = "btn-outline-secondary w-100 mt-2")
+                )
+            }
+        })
+
+        # ---- Dynamic main area: 1 big card for single plots, 2 for UP/DOWN --
+        output$cmp_main_ui <- renderUI({
+            ns <- session$ns
+            if (identical(input$cmp_type, "gene_heatmap")) {
+                card(
+                    card_header(tags$strong("Gene Heatmap (common DEGs)")),
+                    plotOutput(ns("cmp_gene_heatmap"), height = "780px")
+                )
+            } else if (identical(input$cmp_type, "ora")) {
+                card(
+                    card_header(tags$strong("ORA (GO BP) - common DEGs")),
+                    plotOutput(ns("cmp_ora"), height = "780px")
+                )
+            } else {
+                tagList(
+                    fluidRow(column(12, card(
+                        card_header(tags$strong("UP-regulated", style = "color:#d73027")),
+                        plotOutput(ns("cmp_up"), height = "420px")))),
+                    fluidRow(column(12, card(
+                        card_header(tags$strong("DOWN-regulated", style = "color:#4575b4")),
+                        plotOutput(ns("cmp_down"), height = "420px"))))
+                )
+            }
+        })
+
+        # ---- Gene Heatmap & ORA render outputs ------------------------------
+        output$cmp_gene_heatmap <- renderPlot({
+            d <- cmp_sets()
+            req(d)
+            draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto")
+        })
+
+        output$cmp_ora <- renderPlot({
+            d <- cmp_sets()
+            req(d)
+            build_ora_plot(d$common, input$cmp_ora_topn %||% 5)
+        })
+
+        output$cmp_download_png <- downloadHandler(
+            filename = function() {
+                paste0("common_degs_", input$cmp_type %||% "plot", ".png")
+            },
+            content = function(file) {
+                d <- cmp_sets()
+                req(d)
+                png(file, width = 1600, height = 1600, res = 200)
+                on.exit(dev.off(), add = TRUE)
+                if (identical(input$cmp_type, "gene_heatmap")) {
+                    draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto")
+                } else {
+                    print(build_ora_plot(d$common, input$cmp_ora_topn %||% 5))
+                }
+            }
+        )
+
+        output$cmp_download_pdf <- downloadHandler(
+            filename = function() {
+                paste0("common_degs_", input$cmp_type %||% "plot", ".pdf")
+            },
+            content = function(file) {
+                d <- cmp_sets()
+                req(d)
+                pdf(file, width = 9, height = 9)
+                on.exit(dev.off(), add = TRUE)
+                if (identical(input$cmp_type, "gene_heatmap")) {
+                    draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto")
+                } else {
+                    print(build_ora_plot(d$common, input$cmp_ora_topn %||% 5))
+                }
             }
         )
 
