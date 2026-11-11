@@ -10,16 +10,28 @@ mod_qc_ui <- function(id) {
             column(4,
                 card(
                     card_header("QC Metrics"),
-                    DTOutput(ns("metrics_table"))
+                    DTOutput(ns("metrics_table")),
+                    downloadButton(ns("metrics_dl_csv"), "Download table (CSV)",
+                                   class = "btn-outline-secondary btn-sm mt-2")
                 )
             ),
             column(8,
                 navset_card_tab(
                     nav_panel("Library Sizes",
-                        plotlyOutput(ns("plot_library_sizes"), height = "auto")
+                        plotlyOutput(ns("plot_library_sizes"), height = "auto"),
+                        div(class = "mt-2",
+                            downloadButton(ns("libsize_dl_png"), "Download PNG",
+                                           class = "btn-outline-secondary btn-sm"),
+                            downloadButton(ns("libsize_dl_pdf"), "Download PDF",
+                                           class = "btn-outline-secondary btn-sm"))
                     ),
                     nav_panel("Count Distribution",
-                        imageOutput(ns("plot_count_dist"), width = "100%", height = "auto")
+                        imageOutput(ns("plot_count_dist"), width = "100%", height = "auto"),
+                        div(class = "mt-2",
+                            downloadButton(ns("countdist_dl_png"), "Download PNG",
+                                           class = "btn-outline-secondary btn-sm"),
+                            downloadButton(ns("countdist_dl_pdf"), "Download PDF",
+                                           class = "btn-outline-secondary btn-sm"))
                     ),
                     nav_panel("PCA",
                         fluidRow(
@@ -134,35 +146,59 @@ mod_qc_server <- function(id, app_data) {
                       class    = "compact stripe hover")
         })
 
+        output$metrics_dl_csv <- downloadHandler(
+            filename = function() "qc_metrics.csv",
+            content  = function(file) {
+                df <- qc_metrics()
+                req(nrow(df) > 0)
+                write.csv(df, file, row.names = FALSE, quote = FALSE)
+            }
+        )
+
+        # ggplot of library sizes, shared by the interactive view and the exports.
+        build_libsize_ggplot <- function(df) {
+            df$sample <- factor(df$sample, levels = df$sample[order(df$library_size)])
+            ggplot(df, aes(x = library_size / 1e6, y = sample,
+                           fill = condition, text = paste0(
+                               "Sample: ", sample,
+                               "\nLibrary size: ", round(library_size / 1e6, 2), "M",
+                               "\nCondition: ", condition))) +
+                geom_col() +
+                scale_fill_manual(values = ba_distinct_pal(df$condition)) +
+                labs(x = "Library size (millions)", y = NULL, fill = "Condition") +
+                theme_bw(base_size = 11)
+        }
+
         output$plot_library_sizes <- renderPlotly({
             df <- qc_metrics()
             if (nrow(df) == 0) return(plot_ly() %>% layout(title = "No data"))
-            df$sample <- factor(df$sample, levels = df$sample[order(df$library_size)])
-
-            # Generate as many perceptually distinct colours as there are conditions
-            conditions  <- unique(df$condition)
-            n_cond      <- length(conditions)
-            pal         <- setNames(
-                hcl.colors(n_cond, palette = "Dark 3", fixup = TRUE),
-                conditions
-            )
 
             # Scale plot height: ~35px per bar, min 320px, max 900px.
             # Fits in one screen for typical datasets; grows gracefully for large ones.
             plot_h_px <- max(320L, min(35L * nrow(df) + 80L, 900L))
 
-            p <- ggplot(df, aes(x = library_size / 1e6, y = sample,
-                                fill = condition, text = paste0(
-                                    "Sample: ", sample,
-                                    "\nLibrary size: ", round(library_size / 1e6, 2), "M",
-                                    "\nCondition: ", condition
-                                ))) +
-                geom_col() +
-                scale_fill_manual(values = pal) +
-                labs(x = "Library size (millions)", y = NULL, fill = "Condition") +
-                theme_bw(base_size = 11)
-            ggplotly(p, tooltip = "text", height = plot_h_px)
+            ggplotly(build_libsize_ggplot(df), tooltip = "text", height = plot_h_px)
         })
+
+        output$libsize_dl_png <- downloadHandler(
+            filename = function() "qc_library_sizes.png",
+            content  = function(file) {
+                df <- qc_metrics(); req(nrow(df) > 0)
+                h <- max(5, nrow(df) * 0.3)
+                ggplot2::ggsave(file, build_libsize_ggplot(df), device = "png",
+                                width = 8, height = h, dpi = 300, bg = "white")
+            }
+        )
+
+        output$libsize_dl_pdf <- downloadHandler(
+            filename = function() "qc_library_sizes.pdf",
+            content  = function(file) {
+                df <- qc_metrics(); req(nrow(df) > 0)
+                h <- max(5, nrow(df) * 0.3)
+                ggplot2::ggsave(file, build_libsize_ggplot(df), device = "pdf",
+                                width = 8, height = h, bg = "white")
+            }
+        )
 
         # Count Distribution: show the pre-rendered log2 CPM boxplot from the pipeline
         # (all samples, all conditions, generated by qc_analysis.R).
@@ -189,6 +225,35 @@ mod_qc_server <- function(id, app_data) {
                 list(src = "", alt = "Count distribution not available", style = "display:none")
             }
         }, deleteFile = FALSE)
+
+        # Resolve a pre-rendered QC file by stem + extension (searched in the
+        # pipeline qc/ dir). Used by the downloads that serve pipeline outputs.
+        qc_file <- function(stem, ext) {
+            for (base in c(data()$qc_basedir, file.path(RESULTS_DIR, "qc"))) {
+                f <- normalizePath(file.path(base, paste0(stem, ".", ext)),
+                                   mustWork = FALSE)
+                if (file.exists(f)) return(f)
+            }
+            NULL
+        }
+
+        output$countdist_dl_png <- downloadHandler(
+            filename = function() "qc_count_distribution.png",
+            content  = function(file) {
+                src <- qc_file("qc_count_distribution", "png")
+                req(!is.null(src))
+                file.copy(src, file, overwrite = TRUE)
+            }
+        )
+
+        output$countdist_dl_pdf <- downloadHandler(
+            filename = function() "qc_count_distribution.pdf",
+            content  = function(file) {
+                src <- qc_file("qc_count_distribution", "pdf")
+                req(!is.null(src))
+                file.copy(src, file, overwrite = TRUE)
+            }
+        )
 
         # PCA: reactive state for selected samples.
         # Initialized to all samples on first data load; updated only when Apply is clicked.
@@ -297,11 +362,11 @@ mod_qc_server <- function(id, app_data) {
             )
             pca_df[[color_var]] <- ss[[color_var]][match(pca_df$sample, ss$sample)]
 
-            groups <- unique(pca_df[[color_var]])
-            pal    <- setNames(
-                colorRampPalette(RColorBrewer::brewer.pal(8, "Dark2"))(length(groups)),
-                groups
-            )
+            # Stable palette: assign colours over ALL levels of the colour-by
+            # variable so a point keeps its colour when samples are added/removed.
+            pal_all <- ba_distinct_pal(ss[[color_var]])
+            groups  <- unique(as.character(pca_df[[color_var]]))
+            pal     <- pal_all[groups]
 
             n_shown <- length(sample_cols)
             n_total <- length(intersect(ss$sample, colnames(vst)))
@@ -486,12 +551,7 @@ mod_qc_server <- function(id, app_data) {
             if ("batch" %in% colnames(ss))
                 ann$batch <- ss$batch[match(sample_cols, ss$sample)]
 
-            conds <- unique(ss$condition)
-            n_pal <- max(3, min(length(conds), 9))
-            cond_colours <- setNames(
-                colorRampPalette(RColorBrewer::brewer.pal(n_pal, "Set1"))(length(conds)),
-                conds
-            )
+            cond_colours <- ba_distinct_pal(ss$condition)
 
             col_fun <- colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdYlBu")))(100)
             finite_cors <- cor_mat[is.finite(cor_mat)]

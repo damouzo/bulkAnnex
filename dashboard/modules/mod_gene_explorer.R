@@ -40,10 +40,14 @@ mod_gene_explorer_ui <- function(id) {
                             downloadButton(ns("dl_dge_pdf"), "Download PDF",
                                            class = "btn-outline-secondary btn-sm")
                         ),
-                        DTOutput(ns("dge_results_table"))
+                        DTOutput(ns("dge_results_table")),
+                        downloadButton(ns("dge_table_dl_csv"), "Download table (CSV)",
+                                       class = "btn-outline-secondary btn-sm mt-2")
                     ),
                     nav_panel("GSEA membership",
-                        DTOutput(ns("gsea_membership_table"))
+                        DTOutput(ns("gsea_membership_table")),
+                        downloadButton(ns("gsea_membership_dl_csv"), "Download table (CSV)",
+                                       class = "btn-outline-secondary btn-sm mt-2")
                     )
                 )
             )
@@ -302,7 +306,7 @@ mod_gene_explorer_server <- function(id, app_data) {
             }
         )
 
-        output$dge_results_table <- renderDT({
+        dge_results_table_df <- reactive({
             req(input$selected_gene)
             dge_list <- data()$dge
             cids     <- active_contrasts()
@@ -313,16 +317,31 @@ mod_gene_explorer_server <- function(id, app_data) {
                 cbind(contrast = cid, row[, c("gene_name", "baseMean",
                                                "log2FoldChange", "pvalue", "padj")])
             }))
-            if (is.null(all_rows)) return(datatable(data.frame()))
+            if (is.null(all_rows)) return(data.frame())
             all_rows$log2FoldChange <- round(all_rows$log2FoldChange, 3)
             all_rows$baseMean       <- round(all_rows$baseMean, 1)
             all_rows$pvalue         <- signif(all_rows$pvalue, 3)
             all_rows$padj           <- signif(all_rows$padj,   3)
+            all_rows
+        })
+
+        output$dge_results_table <- renderDT({
+            all_rows <- dge_results_table_df()
+            if (nrow(all_rows) == 0) return(datatable(data.frame()))
             datatable(all_rows, rownames = FALSE, class = "compact stripe",
                       options = list(pageLength = 10))
         })
 
-        output$gsea_membership_table <- renderDT({
+        output$dge_table_dl_csv <- downloadHandler(
+            filename = function() paste0(gene_label(), "_DGE_across_contrasts.csv"),
+            content  = function(file) {
+                all_rows <- dge_results_table_df()
+                req(nrow(all_rows) > 0)
+                write.csv(all_rows, file, row.names = FALSE)
+            }
+        )
+
+        gsea_membership_df <- reactive({
             req(input$selected_gene)
             gene_id   <- input$selected_gene
             gene_name <- data()$vst$gene_name[data()$vst$gene_id == gene_id][1]
@@ -398,17 +417,33 @@ mod_gene_explorer_server <- function(id, app_data) {
 
             all_rows <- dplyr::bind_rows(Filter(Negate(is.null),
                                                 unlist(rows, recursive = FALSE)))
-            if (is.null(all_rows) || nrow(all_rows) == 0) {
+            if (is.null(all_rows) || nrow(all_rows) == 0) return(data.frame())
+            if ("NES"  %in% colnames(all_rows)) all_rows$NES  <- round(all_rows$NES, 3)
+            if ("padj" %in% colnames(all_rows)) all_rows$padj <- signif(all_rows$padj, 3)
+            all_rows
+        })
+
+        output$gsea_membership_table <- renderDT({
+            all_rows <- gsea_membership_df()
+            if (nrow(all_rows) == 0) {
                 return(datatable(
-                    data.frame(info = paste0(gene_name, " not found in any leading edge.")),
+                    data.frame(info = paste0(selected_gene_name() %||% "Gene",
+                                             " not found in any leading edge.")),
                     rownames = FALSE, options = list(dom = "t")
                 ))
             }
-            if ("NES"  %in% colnames(all_rows)) all_rows$NES  <- round(all_rows$NES, 3)
-            if ("padj" %in% colnames(all_rows)) all_rows$padj <- signif(all_rows$padj, 3)
             datatable(all_rows, rownames = FALSE, class = "compact stripe",
                       options = list(pageLength = 15, scrollX = TRUE))
         })
+
+        output$gsea_membership_dl_csv <- downloadHandler(
+            filename = function() paste0(gene_label(), "_GSEA_membership.csv"),
+            content  = function(file) {
+                all_rows <- gsea_membership_df()
+                req(nrow(all_rows) > 0)
+                write.csv(all_rows, file, row.names = FALSE)
+            }
+        )
 
     })
 }

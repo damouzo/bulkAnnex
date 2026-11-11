@@ -37,13 +37,17 @@ mod_overview_ui <- function(id) {
             column(6,
                 card(
                     card_header("Samplesheet"),
-                    DTOutput(ns("samplesheet_table"))
+                    DTOutput(ns("samplesheet_table")),
+                    downloadButton(ns("samplesheet_dl_csv"), "Download table (CSV)",
+                                   class = "btn-outline-secondary btn-sm mt-2")
                 )
             ),
             column(6,
                 card(
                     card_header("Contrasts summary"),
-                    DTOutput(ns("contrasts_summary"))
+                    DTOutput(ns("contrasts_summary")),
+                    downloadButton(ns("contrasts_dl_csv"), "Download table (CSV)",
+                                   class = "btn-outline-secondary btn-sm mt-2")
                 )
             )
         )
@@ -70,19 +74,17 @@ mod_overview_server <- function(id, app_data) {
             format(max(all_sig), big.mark = ",")
         })
 
-        output$samplesheet_table <- renderDT({
-            datatable(data()$samplesheet,
-                      options = list(pageLength = 25, scrollX = TRUE),
-                      rownames = FALSE, class = "compact stripe")
+        samplesheet_df <- reactive({
+            data()$samplesheet
         })
 
-        output$contrasts_summary <- renderDT({
-            if (length(data()$dge) == 0) return(datatable(data.frame()))
+        contrasts_summary_df <- reactive({
+            if (length(data()$dge) == 0) return(data.frame())
             ct_meta <- data()$contrasts_meta
             has_ng  <- !is.null(ct_meta) && nrow(ct_meta) > 0 &&
                        "norm_group" %in% colnames(ct_meta) &&
                        "contrast_id" %in% colnames(ct_meta)
-            summary_df <- do.call(rbind, lapply(names(data()$dge), function(cid) {
+            do.call(rbind, lapply(names(data()$dge), function(cid) {
                 df <- data()$dge[[cid]]
                 ng <- if (has_ng) {
                     ct_meta$norm_group[ct_meta$contrast_id == cid][1] %||% "\u2014"
@@ -98,10 +100,39 @@ mod_overview_server <- function(id, app_data) {
                     total      = sum(df$padj < 0.05, na.rm = TRUE)
                 )
             }))
+        })
+
+        output$samplesheet_table <- renderDT({
+            datatable(samplesheet_df(),
+                      options = list(pageLength = 25, scrollX = TRUE),
+                      rownames = FALSE, class = "compact stripe")
+        })
+
+        output$samplesheet_dl_csv <- downloadHandler(
+            filename = function() "samplesheet.csv",
+            content  = function(file) {
+                df <- samplesheet_df()
+                req(nrow(df) > 0)
+                write.csv(df, file, row.names = FALSE)
+            }
+        )
+
+        output$contrasts_summary <- renderDT({
+            summary_df <- contrasts_summary_df()
+            if (nrow(summary_df) == 0) return(datatable(data.frame()))
             datatable(summary_df,
                       colnames = c("Contrast", "Norm group", "Up", "Down", "Total DEGs"),
                       options  = list(pageLength = 10),
                       rownames = FALSE, class = "compact stripe")
         })
+
+        output$contrasts_dl_csv <- downloadHandler(
+            filename = function() "contrasts_summary.csv",
+            content  = function(file) {
+                summary_df <- contrasts_summary_df()
+                req(nrow(summary_df) > 0)
+                write.csv(summary_df, file, row.names = FALSE)
+            }
+        )
     })
 }

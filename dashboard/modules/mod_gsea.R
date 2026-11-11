@@ -62,16 +62,33 @@ mod_gsea_server <- function(id, app_data) {
 
             base_panels <- list(
                 nav_panel("Dot Plot",
-                    imageOutput(ns("dotplot"), width = "100%", height = "auto")
+                    imageOutput(ns("dotplot"), width = "100%", height = "auto"),
+                    div(class = "mt-2",
+                        downloadButton(ns("dotplot_dl_png"), "Download PNG",
+                                       class = "btn-outline-secondary btn-sm"),
+                        downloadButton(ns("dotplot_dl_pdf"), "Download PDF",
+                                       class = "btn-outline-secondary btn-sm"))
                 ),
                 nav_panel("Ridgeplot",
-                    imageOutput(ns("ridgeplot"), width = "100%", height = "auto")
+                    imageOutput(ns("ridgeplot"), width = "100%", height = "auto"),
+                    div(class = "mt-2",
+                        downloadButton(ns("ridgeplot_dl_png"), "Download PNG",
+                                       class = "btn-outline-secondary btn-sm"),
+                        downloadButton(ns("ridgeplot_dl_pdf"), "Download PDF",
+                                       class = "btn-outline-secondary btn-sm"))
                 ),
                 nav_panel("GSEA Plot",
-                    plotOutput(ns("gseaplot"), height = "560px")
+                    plotOutput(ns("gseaplot"), height = "560px"),
+                    div(class = "mt-2",
+                        downloadButton(ns("gseaplot_dl_png"), "Download PNG",
+                                       class = "btn-outline-secondary btn-sm"),
+                        downloadButton(ns("gseaplot_dl_pdf"), "Download PDF",
+                                       class = "btn-outline-secondary btn-sm"))
                 ),
                 nav_panel("Results Table",
-                    DTOutput(ns("results_table"))
+                    DTOutput(ns("results_table")),
+                    downloadButton(ns("results_dl_csv"), "Download table (CSV)",
+                                   class = "btn-outline-secondary btn-sm mt-2")
                 ),
                 nav_panel("Common GSEA",
                     fluidRow(
@@ -135,7 +152,10 @@ mod_gsea_server <- function(id, app_data) {
                         ),
                         tags$p(class = "text-muted",
                                tags$em("Top 10 significant KEGG pathways coloured by log2FC.")),
-                        imageOutput(ns("pathview_img"), width = "100%", height = "auto")
+                        imageOutput(ns("pathview_img"), width = "100%", height = "auto"),
+                        div(class = "mt-2",
+                            downloadButton(ns("pathview_dl_png"), "Download PNG",
+                                           class = "btn-outline-secondary btn-sm"))
                     )
                 ))
             }
@@ -170,9 +190,16 @@ mod_gsea_server <- function(id, app_data) {
                                              value = 500, min = 100, max = 2000),
                                 numericInput(ns("td_ora_padj"), "ORA adj.p cutoff",
                                              value = 1, min = 0, max = 1, step = 0.05),
+                                tags$hr(),
+                                strong("Contrasts to include"),
+                                uiOutput(ns("td_contrast_ui")),
                                 actionButton(ns("td_apply"), "Apply Changes",
                                              icon = icon("play"),
-                                             class = "btn-primary w-100 mt-2")
+                                             class = "btn-primary w-100 mt-2"),
+                                downloadButton(ns("td_download_png"), "Download PNG",
+                                               class = "btn-outline-secondary w-100 mt-2"),
+                                downloadButton(ns("td_download_pdf"), "Download PDF",
+                                               class = "btn-outline-secondary w-100 mt-2")
                             )
                         ),
                         column(9,
@@ -233,6 +260,9 @@ mod_gsea_server <- function(id, app_data) {
         # ---- Dot Plot -------------------------------------------------------
         # Priority: S4 object (dynamic, respects n_terms) → CSV fallback → pre-rendered PNG.
         # The pre-rendered PNG is only used as a last resort when no data is in memory.
+        # dotplot_state caches the last render (PNG path + ggplot) for the exports.
+        dotplot_state <- reactiveVal(NULL)
+
         output$dotplot <- renderImage({
             p_val <- plot_params()
             obj   <- current_gse_obj()
@@ -256,6 +286,7 @@ mod_gsea_server <- function(id, app_data) {
                     }
                 )
                 ggplot2::ggsave(tmpfile, p, width = 10, height = 7, dpi = 100, bg = "white")
+                dotplot_state(list(png = tmpfile, plot = p, w = 10, h = 7))
                 return(list(src = tmpfile, contentType = "image/png",
                             style = "max-width:100%; height:auto;"))
             }
@@ -290,6 +321,7 @@ mod_gsea_server <- function(id, app_data) {
                         theme(axis.text.y = element_text(size = 9))
                 }
                 ggplot2::ggsave(tmpfile, p, width = 10, height = 7, dpi = 100, bg = "white")
+                dotplot_state(list(png = tmpfile, plot = p, w = 10, h = 7))
                 return(list(src = tmpfile, contentType = "image/png",
                             style = "max-width:100%; height:auto;"))
             }
@@ -298,6 +330,7 @@ mod_gsea_server <- function(id, app_data) {
             png_path <- get_gsea_png(RESULTS_DIR, p_val$contrast,
                                      p_val$database, p_val$go_ont, type = "dotplot")
             if (!is.null(png_path)) {
+                dotplot_state(list(png = png_path, plot = NULL, w = 10, h = 7))
                 return(list(src = png_path, contentType = "image/png",
                             style = "max-width:100%; height:auto;"))
             }
@@ -313,6 +346,7 @@ mod_gsea_server <- function(id, app_data) {
                          label = msg, hjust = 0.5, vjust = 0.5) +
                 theme_void()
             ggplot2::ggsave(tmpfile, p, width = 10, height = 7, dpi = 100, bg = "white")
+            dotplot_state(list(png = tmpfile, plot = p, w = 10, h = 7))
             list(src = tmpfile, contentType = "image/png",
                  style = "max-width:100%; height:auto;")
         }, deleteFile = FALSE)
@@ -323,6 +357,9 @@ mod_gsea_server <- function(id, app_data) {
         # when setReadable() has been applied (geneList slot mismatch). In that
         # case we silently fall through to the pre-rendered PNG rather than
         # showing an error — the PNG was generated by the pipeline and is valid.
+        # ridgeplot_state caches the last render for the exports.
+        ridgeplot_state <- reactiveVal(NULL)
+
         output$ridgeplot <- renderImage({
             p_val <- plot_params()
             obj   <- current_gse_obj()
@@ -358,6 +395,7 @@ mod_gsea_server <- function(id, app_data) {
                     plot_h <- max(6, min(max(n_sig, 1L) * 0.45 + 2, 16))
                     ggplot2::ggsave(tmpfile, ridge_p, width = 10, height = plot_h,
                                    dpi = 100, bg = "white")
+                    ridgeplot_state(list(png = tmpfile, plot = ridge_p, w = 10, h = plot_h))
                     return(list(src = tmpfile, contentType = "image/png",
                                 style = "max-width:100%; height:auto;"))
                 }
@@ -368,6 +406,7 @@ mod_gsea_server <- function(id, app_data) {
             png_path <- get_gsea_png(RESULTS_DIR, p_val$contrast,
                                      p_val$database, p_val$go_ont, type = "ridgeplot")
             if (!is.null(png_path)) {
+                ridgeplot_state(list(png = png_path, plot = NULL, w = 10, h = 6))
                 return(list(src = png_path, contentType = "image/png",
                             style = "max-width:100%; height:auto;"))
             }
@@ -385,13 +424,50 @@ mod_gsea_server <- function(id, app_data) {
                          label = msg, hjust = 0.5, vjust = 0.5) +
                 theme_void()
             ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
+            ridgeplot_state(list(png = tmpfile, plot = p, w = 10, h = 6))
             list(src = tmpfile, contentType = "image/png",
                  style = "max-width:100%; height:auto;")
         }, deleteFile = FALSE)
 
+        # Dot Plot / Ridgeplot exports: reuse the cached render (ggplot when
+        # available, otherwise the pre-rendered PNG for PNG downloads).
+        dl_from_state <- function(state, file, ext) {
+            if (is.null(state)) req(FALSE)
+            if (!is.null(state$plot)) {
+                ggplot2::ggsave(file, state$plot, device = ext,
+                                width = state$w %||% 10, height = state$h %||% 7,
+                                dpi = 300, bg = "white")
+            } else if (ext == "png" && !is.null(state$png) && file.exists(state$png)) {
+                file.copy(state$png, file, overwrite = TRUE)
+            } else {
+                req(FALSE)
+            }
+        }
+
+        output$dotplot_dl_png <- downloadHandler(
+            filename = function() paste0(input$contrast %||% "contrast", "_dotplot.png"),
+            content  = function(file) dl_from_state(dotplot_state(), file, "png")
+        )
+
+        output$dotplot_dl_pdf <- downloadHandler(
+            filename = function() paste0(input$contrast %||% "contrast", "_dotplot.pdf"),
+            content  = function(file) dl_from_state(dotplot_state(), file, "pdf")
+        )
+
+        output$ridgeplot_dl_png <- downloadHandler(
+            filename = function() paste0(input$contrast %||% "contrast", "_ridgeplot.png"),
+            content  = function(file) dl_from_state(ridgeplot_state(), file, "png")
+        )
+
+        output$ridgeplot_dl_pdf <- downloadHandler(
+            filename = function() paste0(input$contrast %||% "contrast", "_ridgeplot.pdf"),
+            content  = function(file) dl_from_state(ridgeplot_state(), file, "pdf")
+        )
+
         # ---- GSEA Plot (gseaplot2 — top N pathways by NES) ------------------
         # Requires a gseaResult (S4) object: available for GO, KEGG and Reactome.
-        output$gseaplot <- renderPlot({
+        # Build the gseaplot2 object; shared by renderPlot and the exports.
+        gseaplot_obj <- function() {
             p_val <- plot_params()
             obj   <- current_gse_obj()
 
@@ -431,13 +507,31 @@ mod_gsea_server <- function(id, app_data) {
                         theme_void()
                 }
             )
-        })
+        }
+
+        output$gseaplot <- renderPlot({ gseaplot_obj() })
+
+        output$gseaplot_dl_png <- downloadHandler(
+            filename = function() paste0(input$contrast %||% "contrast", "_gseaplot.png"),
+            content  = function(file) {
+                ggplot2::ggsave(file, gseaplot_obj(), device = "png",
+                                width = 10, height = 7, dpi = 300, bg = "white")
+            }
+        )
+
+        output$gseaplot_dl_pdf <- downloadHandler(
+            filename = function() paste0(input$contrast %||% "contrast", "_gseaplot.pdf"),
+            content  = function(file) {
+                ggplot2::ggsave(file, gseaplot_obj(), device = "pdf",
+                                width = 10, height = 7, bg = "white")
+            }
+        )
 
         # ---- Results Table --------------------------------------------------
-        output$results_table <- renderDT({
+        gsea_results_table_df <- reactive({
             p_val <- plot_params()
             df    <- current_gsea_df()
-            if (nrow(df) == 0) return(datatable(data.frame()))
+            if (nrow(df) == 0) return(data.frame())
             if (p_val$database == "go" && "ontology" %in% colnames(df)) {
                 df <- df[df$ontology == p_val$go_ont, , drop = FALSE]
             }
@@ -450,6 +544,12 @@ mod_gsea_server <- function(id, app_data) {
             if ("NES"  %in% colnames(df_show)) df_show$NES  <- round(df_show$NES,  3)
             if ("padj" %in% colnames(df_show)) df_show$padj <- signif(df_show$padj, 3)
             if ("pval" %in% colnames(df_show)) df_show$pval <- signif(df_show$pval, 3)
+            df_show
+        })
+
+        output$results_table <- renderDT({
+            df_show <- gsea_results_table_df()
+            if (nrow(df_show) == 0) return(datatable(data.frame()))
 
             le_col <- intersect(c("core_enrichment", "leadingEdge"), colnames(df_show))
             col_defs <- if (length(le_col) > 0) {
@@ -477,6 +577,19 @@ mod_gsea_server <- function(id, app_data) {
                       escape      = FALSE,
                       class       = "compact stripe")
         })
+
+        output$results_dl_csv <- downloadHandler(
+            filename = function() {
+                p_val <- plot_params()
+                paste0(p_val$contrast %||% "contrast", "_",
+                       toupper(p_val$database %||% ""), "_GSEA_results.csv")
+            },
+            content = function(file) {
+                df_show <- gsea_results_table_df()
+                req(nrow(df_show) > 0)
+                write.csv(df_show, file, row.names = FALSE)
+            }
+        )
 
         # =====================================================================
         # COMMON GSEA — cross-contrast pathway comparison (Venn / UpSet / Heatmap)
@@ -768,15 +881,49 @@ mod_gsea_server <- function(id, app_data) {
                  style = "max-width:100%; height:auto;")
         }, deleteFile = FALSE)
 
+        output$pathview_dl_png <- downloadHandler(
+            filename = function() {
+                pw <- input$pathview_pathway %||% "pathview"
+                paste0(input$contrast %||% "contrast", "_pathview_", pw, ".png")
+            },
+            content = function(file) {
+                req(input$database == "kegg")
+                pw <- input$pathview_pathway
+                req(!is.null(pw), nchar(pw) > 0)
+                f <- get_pathview_files(RESULTS_DIR, input$contrast)[[pw]]
+                req(!is.null(f), file.exists(f))
+                file.copy(f, file, overwrite = TRUE)
+            }
+        )
+
         # ---- TreeDot --------------------------------------------------------
         # td_gsea_db tag is derived from the global Settings selectors:
         #   input$database ("go"/"kegg"/"reactome") + input$go_ont ("BP"/"MF"/"CC")
-        # Reset last_applied_tag whenever database or ontology changes so the
-        # precomputed PNG is shown first; computation only fires on Apply.
-        last_applied_tag <- reactiveVal(NULL)
+        # The user may also restrict which contrasts are included in the plot.
+        td_applied <- reactiveVal(NULL)   # list(tag, contrasts) frozen on Apply
+        td_cache   <- reactiveVal(NULL)   # list(plot, w, h, tag) of the last render
 
+        # Contrasts available for the TreeDot (from DGE results).
+        output$td_contrast_ui <- renderUI({
+            ns   <- session$ns
+            cids <- names(data()$dge)
+            if (length(cids) == 0) {
+                return(p("No DGE results available.", style = "color:grey;font-size:0.9em;"))
+            }
+            checkboxGroupInput(ns("td_contrasts"), label = NULL,
+                               choices = cids, selected = cids)
+        })
+
+        td_selected_contrasts <- reactive({
+            all_c <- names(data()$dge)
+            sel   <- input$td_contrasts
+            if (is.null(sel)) all_c else intersect(all_c, sel)
+        })
+
+        # Reset the applied state whenever database or ontology changes so the
+        # pre-rendered PNG is shown first; computation only fires on Apply.
         observeEvent(list(input$database, input$go_ont), {
-            last_applied_tag(NULL)
+            td_applied(NULL); td_cache(NULL)
         }, ignoreInit = TRUE)
 
         observeEvent(input$td_apply, {
@@ -788,8 +935,20 @@ mod_gsea_server <- function(id, app_data) {
                 "reactome" = "Reactome",
                 "GO_BP"
             )
-            last_applied_tag(tag)
+            td_applied(list(tag = tag, contrasts = sort(td_selected_contrasts())))
+            td_cache(NULL)
         })
+
+        # Small placeholder PNG for the various "nothing to show" states.
+        td_placeholder <- function(msg, w = 10, h = 6) {
+            tmpfile <- tempfile(fileext = ".png")
+            p <- ggplot() +
+                annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
+                         size = 3.7, colour = "grey50", label = msg) +
+                theme_void()
+            ggplot2::ggsave(tmpfile, p, width = w, height = h, dpi = 100, bg = "white")
+            tmpfile
+        }
 
         output$treedot_plot <- renderImage({
             db  <- input$database %||% "go"
@@ -803,8 +962,42 @@ mod_gsea_server <- function(id, app_data) {
             gsea_db  <- switch(db, "go" = "GO", "kegg" = "KEGG", "Reactome")
             gsea_ont <- if (db == "go") toupper(ont) else NA_character_
 
-            applied_tag  <- last_applied_tag()
-            apply_active <- isTRUE(applied_tag == td_gsea_db)
+            all_contrasts <- names(data()$dge)
+            sel           <- sort(td_selected_contrasts())
+            all_selected  <- length(all_contrasts) > 0 && setequal(sel, all_contrasts)
+
+            applied      <- td_applied()
+            apply_active <- !is.null(applied) && identical(applied$tag, td_gsea_db) &&
+                            identical(applied$contrasts, sel)
+
+            # 1. No Apply yet → show the pre-rendered PNG only when every contrast
+            #    is selected, since that is what the pre-rendered PNG contains.
+            if (!apply_active) {
+                if (all_selected && length(sel) >= 2) {
+                    png_path <- get_treedot_png(RESULTS_DIR, td_gsea_db)
+                    if (!is.null(png_path)) {
+                        return(list(src = png_path, contentType = "image/png",
+                                    style = "max-width:100%; height:auto;"))
+                    }
+                }
+                msg <- if (length(sel) < 2)
+                           "Select at least 2 contrasts for the TreeDot."
+                       else if (!all_selected)
+                           paste0("Contrast subset selected.\n",
+                                  "Click 'Apply Changes' to compute the TreeDot.")
+                       else paste0("No pre-rendered TreeDot found for ", td_gsea_db, ".\n\n",
+                                   "Run the pipeline to generate it, or\n",
+                                   "click 'Apply Changes' to compute now.")
+                return(list(src = td_placeholder(msg), contentType = "image/png",
+                            style = "max-width:100%; height:auto;"))
+            }
+
+            if (length(sel) < 2) {
+                return(list(src = td_placeholder(
+                            "Need >= 2 contrasts in DGE results\nto compute the TreeDot."),
+                            contentType = "image/png",
+                            style = "max-width:100%; height:auto;"))
+            }
 
             # Detect organism from the first available RDS
             rds_list  <- data()$treedot_rds
@@ -814,53 +1007,13 @@ mod_gsea_server <- function(id, app_data) {
             org_db_str <- if (grepl("org\\.Mm", call_str)) "org.Mm.eg.db" else "org.Hs.eg.db"
             kegg_org   <- if (org_db_str == "org.Mm.eg.db") "mmu" else "hsa"
 
-            # Visual params — only read when Apply was clicked for this database
-            top_paths  <- isolate(input$td_top_paths)  %||% 5L
-            clust_num  <- isolate(input$td_clust_num)  %||% 3L
-            ora_type   <- isolate(input$td_ora_type)   %||% "GO"
-            ora_ont    <- isolate(input$td_ora_ont)    %||% "BP"
-            ora_min_gs <- isolate(input$td_ora_min_gs) %||% 10L
-            ora_max_gs <- isolate(input$td_ora_max_gs) %||% 500L
-            ora_padj   <- isolate(input$td_ora_padj)   %||% 1.0
-
-            # 1. No Apply yet for this database → show precomputed PNG or placeholder
-            if (!apply_active) {
-                png_path <- get_treedot_png(RESULTS_DIR, td_gsea_db)
-                if (!is.null(png_path)) {
-                    return(list(src = png_path, contentType = "image/png",
-                                style = "max-width:100%; height:auto;"))
-                }
-                tmpfile <- tempfile(fileext = ".png")
-                p <- ggplot() +
-                    annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
-                             size = 4, colour = "grey50",
-                             label = paste0(
-                                 "No pre-rendered TreeDot found for ", td_gsea_db, ".\n\n",
-                                 "Run the pipeline to generate it, or\n",
-                                 "click 'Apply Changes' to compute now.")) +
-                    theme_void()
-                ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
-                return(list(src = tmpfile, contentType = "image/png",
-                            style = "max-width:100%; height:auto;"))
-            }
-
-            # 2. Apply was clicked: resolve compareClusterResult
-            cmp <- if (!is.null(rds_list) && !is.null(rds_list[[td_gsea_db]])) {
+            # Reuse the stored RDS only for the full contrast set; otherwise
+            # recompute compareCluster for the selected subset (~minutes).
+            use_rds <- all_selected && !is.null(rds_list) && !is.null(rds_list[[td_gsea_db]])
+            cmp <- if (use_rds) {
                 rds_list[[td_gsea_db]]
             } else {
-                # No RDS → recompute from DGE data (~5 min)
-                dge_list <- isolate(data()$dge)
-                if (length(dge_list) < 2) {
-                    tmpfile <- tempfile(fileext = ".png")
-                    p <- ggplot() +
-                        annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
-                                 size = 3.5, colour = "grey50",
-                                 label = "Need >= 2 contrasts in DGE results\nto recompute the TreeDot.") +
-                        theme_void()
-                    ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
-                    return(list(src = tmpfile, contentType = "image/png",
-                                style = "max-width:100%; height:auto;"))
-                }
+                dge_list <- data()$dge[sel]
                 tryCatch(
                     build_treedot_cmp(dge_list, org_db_str, kegg_org,
                                       gsea_db, gsea_ont %||% "BP",
@@ -870,25 +1023,26 @@ mod_gsea_server <- function(id, app_data) {
             }
 
             if (is.null(cmp)) {
-                tmpfile <- tempfile(fileext = ".png")
-                p <- ggplot() +
-                    annotate("text", x = 0.5, y = 0.5, hjust = 0.5, vjust = 0.5,
-                             size = 3.5, colour = "grey50",
-                             label = paste0(
-                                 "compareCluster failed.\n\n",
-                                 "Check GSEA results are available\n",
-                                 "and internet is accessible (KEGG).")) +
-                    theme_void()
-                ggplot2::ggsave(tmpfile, p, width = 10, height = 6, dpi = 100, bg = "white")
-                return(list(src = tmpfile, contentType = "image/png",
+                return(list(src = td_placeholder(paste0(
+                            "compareCluster failed.\n\n",
+                            "Check GSEA results are available\n",
+                            "and internet is accessible (KEGG).")),
+                            contentType = "image/png",
                             style = "max-width:100%; height:auto;"))
             }
 
-            # --- Keytype: detect robustly from the (possibly fresh) cmp ------
+            # Visual params — frozen via isolate so they only change on Apply.
+            top_paths  <- isolate(input$td_top_paths)  %||% 5L
+            clust_num  <- isolate(input$td_clust_num)  %||% 3L
+            ora_type   <- isolate(input$td_ora_type)   %||% "GO"
+            ora_ont    <- isolate(input$td_ora_ont)    %||% "BP"
+            ora_min_gs <- isolate(input$td_ora_min_gs) %||% 10L
+            ora_max_gs <- isolate(input$td_ora_max_gs) %||% 500L
+            ora_padj   <- isolate(input$td_ora_padj)   %||% 1.0
+
             cmp_info <- get_rds_db_info(cmp)
             keytype  <- cmp_info$keytype
 
-            # --- Dynamic canvas size -----------------------------------------
             fort_tmp    <- tryCatch(
                 fortify(cmp, showCategory = top_paths, includeAll = TRUE, split = NULL),
                 error = function(e) data.frame(Description = character(0), Cluster = character(0))
@@ -898,7 +1052,6 @@ mod_gsea_server <- function(id, app_data) {
             plot_h      <- max(8, n_paths * 0.35 + 4)
             plot_w      <- max(12, n_contrasts * 1.2 + 6)
 
-            tmpfile <- tempfile(fileext = ".png")
             p <- tryCatch(
                 plot_treedot(cmp        = cmp,
                              top_paths  = top_paths,
@@ -919,9 +1072,48 @@ mod_gsea_server <- function(id, app_data) {
                         theme_void()
                 }
             )
+            td_cache(list(plot = p, w = plot_w, h = plot_h, tag = td_gsea_db))
+
+            tmpfile <- tempfile(fileext = ".png")
             ggplot2::ggsave(tmpfile, p, width = plot_w, height = plot_h, dpi = 100, bg = "white")
             list(src = tmpfile, contentType = "image/png",
                  style = "max-width:100%; height:auto;")
         }, deleteFile = FALSE)
+
+        # Shared TreeDot export: reuse the last rendered plot when available,
+        # otherwise fall back to the pre-rendered pipeline file.
+        td_export <- function(file, ext) {
+            c <- td_cache()
+            if (!is.null(c) && !is.null(c$plot)) {
+                ggplot2::ggsave(file, c$plot, device = ext,
+                                width = c$w, height = c$h, dpi = 300, bg = "white")
+                return(invisible(NULL))
+            }
+            db  <- input$database %||% "go"
+            ont <- input$go_ont %||% "BP"
+            tag <- switch(db,
+                "go"       = paste0("GO_", toupper(ont)),
+                "kegg"     = "KEGG",
+                "reactome" = "Reactome",
+                "GO_BP"
+            )
+            cand <- file.path(RESULTS_DIR, "gsea", "treedot",
+                              paste0("gsea_treedot_", tag, ".", ext))
+            if (file.exists(cand)) {
+                file.copy(cand, file, overwrite = TRUE)
+            } else {
+                req(FALSE)
+            }
+        }
+
+        output$td_download_png <- downloadHandler(
+            filename = function() paste0("gsea_treedot_", input$database %||% "go", ".png"),
+            content  = function(file) td_export(file, "png")
+        )
+
+        output$td_download_pdf <- downloadHandler(
+            filename = function() paste0("gsea_treedot_", input$database %||% "go", ".pdf"),
+            content  = function(file) td_export(file, "pdf")
+        )
     })
 }

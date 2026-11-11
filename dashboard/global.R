@@ -41,6 +41,28 @@ tryCatch({
 # Null-coalescing operator (rlang-style) — used in modules without requiring rlang on the search path.
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
+# ---- Colour helper (shared with the pipeline) --------------------------------
+# Deterministic, well-separated categorical palette using base R only.
+# Levels are sorted internally so the same set of levels always maps to the same
+# colours (a given sample/condition keeps its colour across subsets and matches
+# the pipeline PNGs). For >12 categories a golden-angle hue wheel is used — no
+# palette can make more than ~10-12 categories truly distinguishable.
+ba_distinct_pal <- function(levels) {
+    levels <- as.character(levels)
+    levels <- sort(unique(levels[!is.na(levels) & nzchar(levels)]))
+    n <- length(levels)
+    cols <- if (n == 0) {
+        character(0)
+    } else if (n <= 8) {
+        grDevices::hcl.colors(n, palette = "Dark 3")
+    } else if (n <= 12) {
+        grDevices::hcl.colors(n, palette = "Set 3")
+    } else {
+        grDevices::hcl(h = (seq_len(n) * 137.508) %% 360, c = 55, l = 65)
+    }
+    stats::setNames(cols, levels)
+}
+
 # ---- Results directory -------------------------------------------------------
 # Priority: BULKANNEX_RESULTS_DIR env var → parent directory of the app → "."
 RESULTS_DIR <- local({

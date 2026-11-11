@@ -63,6 +63,8 @@ mod_dge_ui <- function(id) {
                                     checkboxInput(ns("hm_dend"), "Show dendrograms", value = TRUE),
                                     checkboxInput(ns("hm_supervise"),
                                                   "Supervise columns (group by condition)", value = FALSE),
+                                    numericInput(ns("hm_names_size"), "Gene name size",
+                                                 value = 6, min = 4, max = 20, step = 1),
                                     actionButton(ns("hm_apply"), "Apply settings",
                                                  icon = icon("play"),
                                                  class = "btn-primary w-100 mt-2"),
@@ -81,7 +83,9 @@ mod_dge_ui <- function(id) {
                         )
                     ),
                     nav_panel("Results Table",
-                        DTOutput(ns("results_table"))
+                        DTOutput(ns("results_table")),
+                        downloadButton(ns("results_dl_csv"), "Download table (CSV)",
+                                       class = "btn-outline-secondary btn-sm mt-2")
                     ),
                     nav_panel("Common DEGs",
                         fluidRow(
@@ -408,7 +412,8 @@ mod_dge_server <- function(id, app_data) {
                 cluster_rows = isTRUE(input$hm_cluster_rows),
                 cluster_cols = isTRUE(input$hm_cluster_cols),
                 dend         = isTRUE(input$hm_dend),
-                supervise    = isTRUE(input$hm_supervise)
+                supervise    = isTRUE(input$hm_supervise),
+                names_size   = input$hm_names_size %||% 6
             )
         }
 
@@ -547,7 +552,7 @@ mod_dge_server <- function(id, app_data) {
                     annotation_name_gp = grid::gpar(fontsize = 8)),
                 show_row_names    = isTRUE(p$names),
                 show_column_names = TRUE,
-                row_names_gp      = grid::gpar(fontsize = 6),
+                row_names_gp      = grid::gpar(fontsize = p$names_size %||% 6),
                 column_names_gp   = grid::gpar(fontsize = 8),
                 cluster_rows      = isTRUE(p$cluster_rows),
                 cluster_columns   = cluster_cols,
@@ -914,7 +919,8 @@ mod_dge_server <- function(id, app_data) {
 
         # Gene Heatmap: rows = genes DEG in ALL selected contrasts (either
         # direction), columns = contrasts, cell = shrunken log2FC.
-        draw_gene_heatmap <- function(common_genes, dge_full, names_mode = "auto") {
+        draw_gene_heatmap <- function(common_genes, dge_full, names_mode = "auto",
+                                      names_size = 7) {
             if (!cmp_pkgs_ok) {
                 grid::grid.text("Package(s) unavailable. Please rebuild the container.",
                                 gp = grid::gpar(fontsize = 12, col = "firebrick"))
@@ -956,7 +962,7 @@ mod_dge_server <- function(id, app_data) {
                 col               = col_fun,
                 na_col            = "#cccccc",
                 show_row_names    = show_rn,
-                row_names_gp      = grid::gpar(fontsize = 7),
+                row_names_gp      = grid::gpar(fontsize = names_size),
                 column_names_gp   = grid::gpar(fontsize = 9),
                 cluster_rows      = TRUE,
                 cluster_columns   = FALSE,
@@ -969,23 +975,19 @@ mod_dge_server <- function(id, app_data) {
             ComplexHeatmap::draw(ht)
         }
 
-        # ORA (GO BP) dotplot over the same common genes. pvalueCutoff = 1 so
-        # the top pathways are shown even when none reach significance.
-        build_ora_plot <- function(common_genes, top_n = 5) {
-            placeholder <- function(msg) {
-                ggplot2::ggplot() +
-                    ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
-                                      size = 4, colour = "grey45") +
-                    ggplot2::theme_void()
-            }
-            if (length(common_genes) < 2) {
-                return(placeholder(paste0("No genes are DEG in all selected contrasts (n = ",
-                                          length(common_genes), ").")))
-            }
-            org_db <- get(detect_organism(common_genes))
-            ego <- tryCatch(
+        # ORA (GO BP) over the common genes. pvalueCutoff = 1 so the top pathways
+        # are shown even when none reach significance. The (slow) enrichGO call is
+        # cached in cmp_ora_ego() so changing the "Top pathways" number or the gene
+        # label size does not recompute it.
+        cmp_ora_ego <- reactive({
+            d <- cmp_sets()
+            req(d)
+            common <- d$common
+            if (length(common) < 2) return(NULL)
+            org_db <- get(detect_organism(common))
+            tryCatch(
                 clusterProfiler::enrichGO(
-                    gene          = common_genes,
+                    gene          = common,
                     OrgDb         = org_db,
                     keyType       = "ENSEMBL",
                     ont           = "BP",
@@ -996,14 +998,27 @@ mod_dge_server <- function(id, app_data) {
                     maxGSSize     = 500,
                     readable      = TRUE),
                 error = function(e) { message("enrichGO: ", e$message); NULL })
+        })
+
+        build_ora_plot <- function(ego, n_common, top_n = 5) {
+            placeholder <- function(msg) {
+                ggplot2::ggplot() +
+                    ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
+                                      size = 4, colour = "grey45") +
+                    ggplot2::theme_void()
+            }
+            if (n_common < 2) {
+                return(placeholder(paste0("No genes are DEG in all selected contrasts (n = ",
+                                          n_common, ").")))
+            }
             if (is.null(ego) || nrow(as.data.frame(ego)) == 0) {
                 return(placeholder(paste0("No GO BP terms enriched for the ",
-                                          length(common_genes), " common genes.")))
+                                          n_common, " common genes.")))
             }
             enrichplot::dotplot(
                     ego,
                     showCategory = min(top_n, nrow(as.data.frame(ego))),
-                    title        = paste0("ORA GO BP - ", length(common_genes),
+                    title        = paste0("ORA GO BP - ", n_common,
                                           " common DEGs")) +
                 ggplot2::theme_bw(base_size = 11) +
                 ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5,
@@ -1014,11 +1029,15 @@ mod_dge_server <- function(id, app_data) {
         output$cmp_opts_ui <- renderUI({
             ns <- session$ns
             if (identical(input$cmp_type, "gene_heatmap")) {
-                selectInput(ns("cmp_hm_names"), "Gene labels",
-                            choices  = c("Auto (\u226450 genes)" = "auto",
-                                         "Always"             = "always",
-                                         "Never"              = "never"),
-                            selected = "auto")
+                tagList(
+                    selectInput(ns("cmp_hm_names"), "Gene labels",
+                                choices  = c("Auto (\u226450 genes)" = "auto",
+                                             "Always"             = "always",
+                                             "Never"              = "never"),
+                                selected = "auto"),
+                    numericInput(ns("cmp_hm_fontsize"), "Gene name size",
+                                 value = 7, min = 4, max = 20, step = 1)
+                )
             } else if (identical(input$cmp_type, "ora")) {
                 numericInput(ns("cmp_ora_topn"), "Top pathways",
                              value = 5, min = 1, max = 20, step = 1)
@@ -1056,7 +1075,10 @@ mod_dge_server <- function(id, app_data) {
             } else if (identical(input$cmp_type, "ora")) {
                 card(
                     card_header(tags$strong("ORA (GO BP) - common DEGs")),
-                    plotOutput(ns("cmp_ora"), height = "780px")
+                    shinycssloaders::withSpinner(
+                        plotOutput(ns("cmp_ora"), height = "780px"),
+                        caption = "Computing enrichment\u2026"
+                    )
                 )
             } else {
                 tagList(
@@ -1074,13 +1096,14 @@ mod_dge_server <- function(id, app_data) {
         output$cmp_gene_heatmap <- renderPlot({
             d <- cmp_sets()
             req(d)
-            draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto")
+            draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto",
+                              input$cmp_hm_fontsize %||% 7)
         })
 
         output$cmp_ora <- renderPlot({
             d <- cmp_sets()
             req(d)
-            build_ora_plot(d$common, input$cmp_ora_topn %||% 5)
+            build_ora_plot(cmp_ora_ego(), length(d$common), input$cmp_ora_topn %||% 5)
         })
 
         output$cmp_download_png <- downloadHandler(
@@ -1093,9 +1116,11 @@ mod_dge_server <- function(id, app_data) {
                 png(file, width = 1600, height = 1600, res = 200)
                 on.exit(dev.off(), add = TRUE)
                 if (identical(input$cmp_type, "gene_heatmap")) {
-                    draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto")
+                    draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto",
+                                      input$cmp_hm_fontsize %||% 7)
                 } else {
-                    print(build_ora_plot(d$common, input$cmp_ora_topn %||% 5))
+                    print(build_ora_plot(cmp_ora_ego(), length(d$common),
+                                         input$cmp_ora_topn %||% 5))
                 }
             }
         )
@@ -1110,16 +1135,18 @@ mod_dge_server <- function(id, app_data) {
                 pdf(file, width = 9, height = 9)
                 on.exit(dev.off(), add = TRUE)
                 if (identical(input$cmp_type, "gene_heatmap")) {
-                    draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto")
+                    draw_gene_heatmap(d$common, d$dge_full, input$cmp_hm_names %||% "auto",
+                                      input$cmp_hm_fontsize %||% 7)
                 } else {
-                    print(build_ora_plot(d$common, input$cmp_ora_topn %||% 5))
+                    print(build_ora_plot(cmp_ora_ego(), length(d$common),
+                                         input$cmp_ora_topn %||% 5))
                 }
             }
         )
 
-        output$results_table <- renderDT({
+        results_table_df <- reactive({
             df <- current_dge()
-            if (nrow(df) == 0) return(datatable(data.frame()))
+            if (is.null(df) || nrow(df) == 0) return(data.frame())
             df_show <- df %>%
                 mutate(
                     log2FoldChange = round(log2FoldChange, 3),
@@ -1127,8 +1154,13 @@ mod_dge_server <- function(id, app_data) {
                     pvalue         = signif(pvalue, 3),
                     padj           = signif(padj, 3)
                 )
-            df_show <- df_show[, c("gene_id", "gene_name", "baseMean", "log2FoldChange",
-                                   "pvalue", "padj", "direction"), drop = FALSE]
+            df_show[, c("gene_id", "gene_name", "baseMean", "log2FoldChange",
+                        "pvalue", "padj", "direction"), drop = FALSE]
+        })
+
+        output$results_table <- renderDT({
+            df_show <- results_table_df()
+            if (nrow(df_show) == 0) return(datatable(data.frame()))
 
             datatable(df_show,
                       filter   = "top",
@@ -1141,5 +1173,16 @@ mod_dge_server <- function(id, app_data) {
                                 c("#fdd0c8", "#c8d8f8", "white")
                             ))
         })
+
+        output$results_dl_csv <- downloadHandler(
+            filename = function() {
+                paste0(input$contrast %||% "contrast", "_DGE_results.csv")
+            },
+            content  = function(file) {
+                df_show <- results_table_df()
+                req(nrow(df_show) > 0)
+                write.csv(df_show, file, row.names = FALSE)
+            }
+        )
     })
 }

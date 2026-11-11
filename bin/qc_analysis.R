@@ -18,6 +18,14 @@ option_list <- list(
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
+# ---- shared colour helper ---------------------------------------------------
+.this_dir <- local({
+    args <- commandArgs(trailingOnly = FALSE)
+    fa   <- grep("^--file=", args, value = TRUE)
+    if (length(fa) > 0) dirname(normalizePath(sub("^--file=", "", fa[1]))) else getwd()
+})
+source(file.path(.this_dir, "palettes.R"))
+
 # ---- load data --------------------------------------------------------------
 message("Loading counts...")
 counts_raw <- read.delim(opt$counts, check.names = FALSE, stringsAsFactors = FALSE)
@@ -91,13 +99,8 @@ save_plot <- function(filename_base, plot_obj = NULL, width = 8, height = 6, gg 
     }
 }
 
-# colour palette per condition
-conditions     <- factor(ss$condition)
-n_cond         <- nlevels(conditions)
-cond_colours   <- setNames(
-    colorRampPalette(brewer.pal(min(n_cond, 9), "Set1"))(n_cond),
-    levels(conditions)
-)
+# colour palette per condition (well-separated, deterministic, base R only)
+cond_colours   <- ba_distinct_pal(ss$condition)
 
 # ---- 1. Library size bar plot -----------------------------------------------
 message("Plotting library sizes...")
@@ -138,13 +141,18 @@ save_plot(paste0(opt$prefix, "_count_distribution"), p_dist,
 # PCA plot are produced:
 #   qc_pca_all.{pdf,png}          — all samples together
 #   qc_pca_<norm_group>.{pdf,png} — one plot per norm_group (subset of samples)
+# A single global sample palette is built once so a given sample keeps the same
+# colour in the "all" plot and in every per-group plot.
+all_samples <- colnames(vst_mat)
+sample_pal  <- ba_distinct_pal(all_samples)
+
 build_pca_plot <- function(sample_ids, title) {
     mat <- t(vst_mat[, sample_ids, drop = FALSE])
     res <- prcomp(mat, scale. = FALSE)
     pct <- round(100 * res$sdev^2 / sum(res$sdev^2), 1)
     df  <- as.data.frame(res$x[, 1:2, drop = FALSE])
     df$sample <- rownames(df)
-    pal <- setNames(colorRampPalette(brewer.pal(8, "Dark2"))(nrow(df)), df$sample)
+    pal <- sample_pal[df$sample]
 
     ggplot(df, aes(x = PC1, y = PC2, colour = sample)) +
         geom_point(size = 3) +
@@ -157,7 +165,6 @@ build_pca_plot <- function(sample_ids, title) {
 }
 
 message("Plotting PCA...")
-all_samples <- colnames(vst_mat)
 
 # 3a. All samples coloured by sample name
 p_pca_all <- build_pca_plot(all_samples, "PCA — VST (blind)")
