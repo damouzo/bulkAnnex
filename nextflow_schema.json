@@ -114,6 +114,19 @@
                     "fa_icon": "fas fa-sliders-h",
                     "minimum": 0
                 },
+                "dge_top_n": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Number of top genes (by |log2FC| among significant genes) for the base heatmap, which shows gene names.",
+                    "fa_icon": "fas fa-layer-group",
+                    "minimum": 2
+                },
+                "dge_top_n_extra": {
+                    "type": "string",
+                    "default": "100,200",
+                    "description": "Comma-separated additional top-N heatmap sizes (no gene names).",
+                    "fa_icon": "fas fa-layer-group"
+                },
                 "gsea_pval_cutoff": {
                     "type": "number",
                     "default": 0.05,

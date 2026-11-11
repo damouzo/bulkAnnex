@@ -16,7 +16,7 @@ process DESEQ2_DGE {
     path "${meta.contrast_id}_DESeq2_results.rds",                    emit: results_rds
     path "${meta.contrast_id}_volcano.{pdf,png}",                    emit: volcano
     path "${meta.contrast_id}_MA.{pdf,png}",                         emit: ma_plot
-    path "${meta.contrast_id}_top_genes_heatmap.{pdf,png}",          optional: true, emit: heatmap
+    path "${meta.contrast_id}_top{50,100,200}_genes_heatmap.{pdf,png}", optional: true, emit: heatmap
     path 'versions.yml',                                             emit: versions
 
     when:

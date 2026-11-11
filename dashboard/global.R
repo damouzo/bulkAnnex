@@ -86,6 +86,29 @@ load_vst_counts <- function(results_dir) {
     data.frame()
 }
 
+# Load the design-aware (blind = FALSE) VST matrices written per norm_group by
+# DESEQ2_NORMALIZATION (counts/norm/<group>/deseq2_vst_counts.tsv; a flat file
+# when the group is "all"). Returns a named list keyed by norm_group. These
+# values are only comparable within their own group, so they are used solely by
+# the DGE heatmap (which always operates on a single contrast inside one group).
+load_norm_vst <- function(results_dir) {
+    base <- file.path(results_dir, "counts", "norm")
+    out  <- list()
+    if (!dir.exists(base)) return(out)
+    flat <- file.path(base, "deseq2_vst_counts.tsv")
+    if (file.exists(flat)) {
+        out[["all"]] <- read.delim(flat, check.names = FALSE, stringsAsFactors = FALSE)
+    }
+    subdirs <- list.dirs(base, recursive = FALSE, full.names = TRUE)
+    for (d in subdirs) {
+        f <- file.path(d, "deseq2_vst_counts.tsv")
+        if (file.exists(f)) {
+            out[[basename(d)]] <- read.delim(f, check.names = FALSE, stringsAsFactors = FALSE)
+        }
+    }
+    out
+}
+
 load_qc_metrics <- function(results_dir) {
     f <- file.path(results_dir, "qc", "qc_metrics.csv")
     if (file.exists(f)) read.csv(f, stringsAsFactors = FALSE, check.names = FALSE)
@@ -183,6 +206,7 @@ load_all_data <- function(results_dir = RESULTS_DIR) {
         qc_basedir      = file.path(results_dir, "qc"),
         qc_heatmap_path = file.path(results_dir, "qc", "qc_correlation_heatmap.png"),
         dge             = load_dge_results(results_dir),
+        norm_vst        = load_norm_vst(results_dir),
         gsea            = load_gsea_csv(results_dir),
         gsea_objects    = load_gsea_objects(results_dir),
         contrasts_meta  = load_contrasts_meta(results_dir),
@@ -214,6 +238,25 @@ get_gsea_png <- function(results_dir, contrast, database, go_ont = "BP",
 get_dge_volcano_png <- function(results_dir, contrast) {
     f <- file.path(results_dir, "dge", contrast, paste0(contrast, "_volcano.png"))
     if (file.exists(f)) f else NULL
+}
+
+# Helper: return the pre-rendered top-N heatmap PNG for a contrast, or NULL.
+# Falls back to the legacy single-heatmap name for runs before the rename.
+get_dge_heatmap_png <- function(results_dir, contrast, n = 50) {
+    dge_dir <- file.path(results_dir, "dge", contrast)
+    f <- file.path(dge_dir, paste0(contrast, "_top", n, "_genes_heatmap.png"))
+    if (file.exists(f)) return(f)
+    legacy <- file.path(dge_dir, paste0(contrast, "_top_genes_heatmap.png"))
+    if (file.exists(legacy)) return(legacy)
+    NULL
+}
+
+# Helper: resolve the norm_group a contrast belongs to. Defaults to "all".
+get_contrast_norm_group <- function(contrasts_meta, contrast_id) {
+    if (is.null(contrasts_meta) || nrow(contrasts_meta) == 0) return("all")
+    if (!"norm_group" %in% colnames(contrasts_meta)) return("all")
+    hit <- contrasts_meta$norm_group[contrasts_meta$contrast_id == contrast_id]
+    if (length(hit) == 0 || is.na(hit[1])) "all" else hit[1]
 }
 
 # Helper: return named vector of pathview PNGs for a contrast.

@@ -39,6 +39,47 @@ mod_dge_ui <- function(id) {
                     nav_panel("Volcano",
                         imageOutput(ns("volcano_plot"), width = "100%", height = "700px")
                     ),
+                    nav_panel("Heatmap",
+                        fluidRow(
+                            column(3,
+                                card(
+                                    card_header("Heatmap settings"),
+                                    numericInput(ns("hm_top_n"), "Top N genes (rows)",
+                                                 value = 50, min = 2, max = 1000, step = 1),
+                                    numericInput(ns("hm_lfc"), "|log2FC| cutoff",
+                                                 value = 1, min = 0, max = 10, step = 0.1),
+                                    numericInput(ns("hm_padj"), "FDR cutoff",
+                                                 value = 0.05, min = 0.001, max = 0.2, step = 0.001),
+                                    radioButtons(ns("hm_rank"), "Rank genes by",
+                                        choices  = c("|log2FC|" = "logfc", "padj" = "padj"),
+                                        selected = "logfc", inline = TRUE),
+                                    radioButtons(ns("hm_mode"), "Ranking mode",
+                                        choices  = c("Top N by metric" = "abs",
+                                                     "Balanced (N/2 up + N/2 down)" = "balanced"),
+                                        selected = "abs"),
+                                    checkboxInput(ns("hm_names"), "Show gene names", value = TRUE),
+                                    checkboxInput(ns("hm_cluster_rows"), "Cluster rows (genes)", value = TRUE),
+                                    checkboxInput(ns("hm_cluster_cols"), "Cluster columns (samples)", value = TRUE),
+                                    checkboxInput(ns("hm_dend"), "Show dendrograms", value = TRUE),
+                                    checkboxInput(ns("hm_supervise"),
+                                                  "Supervise columns (group by condition)", value = FALSE),
+                                    actionButton(ns("hm_apply"), "Apply settings",
+                                                 icon = icon("play"),
+                                                 class = "btn-primary w-100 mt-2"),
+                                    downloadButton(ns("hm_download"), "Download PNG",
+                                                   class = "btn-outline-secondary w-100 mt-2"),
+                                    downloadButton(ns("hm_download_pdf"), "Download PDF",
+                                                   class = "btn-outline-secondary w-100 mt-2")
+                                )
+                            ),
+                            column(9,
+                                card(
+                                    card_header("Top genes heatmap"),
+                                    imageOutput(ns("hm_plot"), width = "100%", height = "800px")
+                                )
+                            )
+                        )
+                    ),
                     nav_panel("Results Table",
                         DTOutput(ns("results_table"))
                     ),
@@ -369,6 +410,267 @@ mod_dge_server <- function(id, app_data) {
                 req(!is.null(p_vol))
                 ggplot2::ggsave(file, p_vol, device = "pdf",
                                 width = 8, height = 8, bg = "white")
+            }
+        )
+
+        # =====================================================================
+        # HEATMAP — server logic (ComplexHeatmap + design-aware VST per group)
+        # =====================================================================
+        hm_pkgs_ok <- requireNamespace("ComplexHeatmap", quietly = TRUE) &&
+                      requireNamespace("circlize", quietly = TRUE)
+
+        collect_hm_params <- function(contrast) {
+            list(
+                contrast     = contrast,
+                top_n        = input$hm_top_n %||% 50,
+                lfc          = input$hm_lfc %||% 1,
+                padj         = input$hm_padj %||% 0.05,
+                rank         = input$hm_rank %||% "logfc",
+                mode         = input$hm_mode %||% "abs",
+                names        = isTRUE(input$hm_names),
+                cluster_rows = isTRUE(input$hm_cluster_rows),
+                cluster_cols = isTRUE(input$hm_cluster_cols),
+                dend         = isTRUE(input$hm_dend),
+                supervise    = isTRUE(input$hm_supervise)
+            )
+        }
+
+        # Frozen params: default (pre-rendered) view until Apply is pressed.
+        applied_hm_params <- reactiveVal(NULL)
+        observeEvent(input$contrast, { applied_hm_params(NULL) }, ignoreInit = TRUE)
+        observeEvent(input$hm_apply, {
+            applied_hm_params(collect_hm_params(input$contrast))
+        })
+
+        # Select top genes: significant (padj + |log2FC| cutoffs), ranked by the
+        # chosen metric; "abs" = top N overall, "balanced" = N/2 up + N/2 down.
+        select_heatmap_genes <- function(df, p) {
+            df <- df[!is.na(df$padj) & !is.na(df$log2FoldChange), , drop = FALSE]
+            df <- df[df$padj < p$padj & abs(df$log2FoldChange) >= p$lfc, , drop = FALSE]
+            if (nrow(df) == 0) {
+                return(list(genes = character(0),
+                            note = "No significant genes for the current cutoffs."))
+            }
+            metric_of <- function(sub) {
+                if (identical(p$rank, "padj")) sub$padj else abs(sub$log2FoldChange)
+            }
+            if (identical(p$mode, "balanced")) {
+                n_half <- ceiling(p$top_n / 2)
+                up <- df[df$log2FoldChange > 0, , drop = FALSE]
+                dn <- df[df$log2FoldChange < 0, , drop = FALSE]
+                up <- up[order(metric_of(up)), , drop = FALSE]
+                dn <- dn[order(metric_of(dn)), , drop = FALSE]
+                genes <- c(head(up$gene_id, n_half), head(dn$gene_id, n_half))
+            } else {
+                inc <- identical(p$rank, "padj")  # padj: ascending; |log2FC|: descending
+                ord <- order(metric_of(df), decreasing = !inc)
+                genes <- head(df$gene_id[ord], p$top_n)
+            }
+            list(genes = unique(genes), note = NULL)
+        }
+
+        # Build the ComplexHeatmap object, or a message-only placeholder.
+        build_heatmap_obj <- function(contrast, p) {
+            df <- data()$dge[[contrast]]
+            if (is.null(df) || nrow(df) == 0) {
+                return(list(ht = NULL, msg = "No DGE results for this contrast."))
+            }
+            sel <- select_heatmap_genes(df, p)
+            if (length(sel$genes) < 2) {
+                return(list(ht = NULL, msg = sel$note %||% "Too few genes to plot."))
+            }
+
+            # Design-aware VST for this contrast's norm_group (matches the pipeline).
+            grp      <- get_contrast_norm_group(data()$contrasts_meta, contrast)
+            vst_df   <- data()$norm_vst[[grp]]
+            src_note <- NULL
+            if (is.null(vst_df)) {
+                vst_df   <- data()$vst
+                src_note <- paste0("Design-aware VST for group '", grp,
+                                   "' not found; using global blind VST.")
+            }
+            if (is.null(vst_df) || nrow(vst_df) == 0) {
+                return(list(ht = NULL, msg = "No VST matrix available."))
+            }
+
+            gene_name_map <- setNames(vst_df$gene_name, vst_df$gene_id)
+            vst_mat <- as.matrix(vst_df[, !colnames(vst_df) %in% c("gene_id", "gene_name"), drop = FALSE])
+            rownames(vst_mat) <- vst_df$gene_id
+
+            ss <- data()$samplesheet
+            cm <- data()$contrasts_meta
+            if (!is.null(cm) && nrow(cm) > 0 && contrast %in% cm$contrast_id) {
+                row          <- cm[match(contrast, cm$contrast_id), ]
+                contrast_var <- row$variable
+                ref <- row$reference
+                trt <- row$treatment
+            } else {
+                contrast_var <- "condition"
+                ref <- trt <- NULL
+            }
+            if (is.null(ss) || nrow(ss) == 0) {
+                return(list(ht = NULL, msg = "No samplesheet available."))
+            }
+            cond_col <- if (!is.null(contrast_var) && contrast_var %in% colnames(ss)) {
+                ss[[contrast_var]]
+            } else if ("condition" %in% colnames(ss)) {
+                ss$condition
+            } else {
+                NULL
+            }
+            if (is.null(cond_col)) {
+                return(list(ht = NULL, msg = "Samplesheet has no condition column."))
+            }
+            keep_ss <- if (!is.null(ref) && !is.null(trt)) cond_col %in% c(ref, trt) else rep(TRUE, nrow(ss))
+            samples <- intersect(ss$sample[keep_ss], colnames(vst_mat))
+            if (length(samples) < 2) {
+                return(list(ht = NULL, msg = "Fewer than 2 samples for this contrast."))
+            }
+
+            mat  <- vst_mat[intersect(sel$genes, rownames(vst_mat)), samples, drop = FALSE]
+            keep <- apply(mat, 1, function(x) all(is.finite(x)) && stats::sd(x) > 0)
+            mat  <- mat[keep, , drop = FALSE]
+            if (nrow(mat) < 2) {
+                return(list(ht = NULL, msg = "Too few variable genes for the selected cutoffs."))
+            }
+            mat <- mat - rowMeans(mat)  # center per row (matches pipeline)
+
+            labs <- gene_name_map[rownames(mat)]
+            miss <- is.na(labs) | !nzchar(labs)
+            labs[miss] <- rownames(mat)[miss]
+            rownames(mat) <- make.unique(labs)
+
+            sample_cond <- cond_col[match(samples, ss$sample)]
+            cond_vec    <- if (!is.null(ref) && !is.null(trt)) {
+                factor(sample_cond, levels = unique(c(ref, trt)))
+            } else {
+                factor(sample_cond)
+            }
+            cond_lvls <- levels(cond_vec)
+            n_pal     <- max(3, min(length(cond_lvls), 9))
+            cond_cols <- setNames(
+                colorRampPalette(brewer.pal(n_pal, "Set1"))(length(cond_lvls)),
+                cond_lvls)
+
+            lim     <- max(stats::quantile(abs(mat), 0.98, na.rm = TRUE), 1e-6)
+            col_fun <- circlize::colorRamp2(c(-lim, 0, lim),
+                                            c("#4575b4", "white", "#d73027"))
+
+            cluster_cols  <- isTRUE(p$cluster_cols) && !isTRUE(p$supervise)
+            show_col_dend <- cluster_cols && isTRUE(p$dend)
+            show_row_dend <- isTRUE(p$cluster_rows) && isTRUE(p$dend)
+
+            ht <- ComplexHeatmap::Heatmap(
+                mat,
+                name              = "Centered VST",
+                col               = col_fun,
+                top_annotation    = ComplexHeatmap::HeatmapAnnotation(
+                    condition          = cond_vec,
+                    col                = list(condition = cond_cols),
+                    annotation_name_gp = grid::gpar(fontsize = 8)),
+                show_row_names    = isTRUE(p$names),
+                show_column_names = TRUE,
+                row_names_gp      = grid::gpar(fontsize = 6),
+                column_names_gp   = grid::gpar(fontsize = 8),
+                cluster_rows      = isTRUE(p$cluster_rows),
+                cluster_columns   = cluster_cols,
+                show_row_dend     = show_row_dend,
+                show_column_dend  = show_col_dend,
+                column_split      = if (isTRUE(p$supervise)) cond_vec else NULL,
+                column_title      = paste0("Top ", nrow(mat), " genes: ", contrast),
+                column_title_gp   = grid::gpar(fontsize = 12, fontface = "bold"),
+                heatmap_legend_param = list(title_gp  = grid::gpar(fontsize = 9),
+                                            labels_gp = grid::gpar(fontsize = 8))
+            )
+            list(ht = ht, msg = src_note)
+        }
+
+        draw_heatmap_obj <- function(obj) {
+            if (is.null(obj$ht)) {
+                grid::grid.newpage()
+                grid::grid.text(obj$msg %||% "Heatmap unavailable.",
+                                gp = grid::gpar(col = "grey45", fontsize = 12))
+            } else {
+                ComplexHeatmap::draw(obj$ht)
+            }
+        }
+
+        # Render a heatmap to a raster file at a given resolution.
+        render_heatmap_file <- function(file, contrast, p, res = 150) {
+            png(file, width = 8 * res, height = 8 * res, res = res)
+            on.exit(dev.off(), add = TRUE)
+            if (!hm_pkgs_ok) {
+                grid::grid.newpage()
+                grid::grid.text("ComplexHeatmap unavailable.\nPlease rebuild the container.",
+                                gp = grid::gpar(col = "firebrick", fontsize = 12))
+            } else {
+                draw_heatmap_obj(build_heatmap_obj(contrast, p))
+            }
+        }
+
+        current_hm_params <- function(contrast) {
+            p_applied <- applied_hm_params()
+            if (!is.null(p_applied) && identical(p_applied$contrast, contrast)) {
+                p_applied
+            } else {
+                collect_hm_params(contrast)
+            }
+        }
+
+        output$hm_plot <- renderImage({
+            contrast <- input$contrast
+            req(contrast)
+
+            p_applied    <- applied_hm_params()
+            apply_active <- !is.null(p_applied) && identical(p_applied$contrast, contrast)
+
+            # 1) Default view: pipeline pre-rendered top-50 heatmap (instant, no compute)
+            if (!apply_active) {
+                png_path <- get_dge_heatmap_png(RESULTS_DIR, contrast, 50)
+                if (!is.null(png_path)) {
+                    return(list(
+                        src         = png_path,
+                        contentType = "image/png",
+                        style       = "width:100%; height:800px; object-fit:contain; background:white;"))
+                }
+            }
+
+            # 2) Apply clicked (or no pre-rendered PNG): recompute with ComplexHeatmap
+            tmpfile <- tempfile(fileext = ".png")
+            render_heatmap_file(tmpfile, contrast, current_hm_params(contrast), res = 120)
+            list(
+                src         = tmpfile,
+                contentType = "image/png",
+                style       = "width:100%; height:800px; object-fit:contain; background:white;")
+        }, deleteFile = FALSE)
+
+        output$hm_download <- downloadHandler(
+            filename = function() {
+                paste0(input$contrast %||% "contrast", "_heatmap_dashboard.png")
+            },
+            content = function(file) {
+                contrast <- input$contrast
+                req(contrast)
+                render_heatmap_file(file, contrast, current_hm_params(contrast), res = 300)
+            }
+        )
+
+        output$hm_download_pdf <- downloadHandler(
+            filename = function() {
+                paste0(input$contrast %||% "contrast", "_heatmap_dashboard.pdf")
+            },
+            content = function(file) {
+                contrast <- input$contrast
+                req(contrast)
+                pdf(file, width = 8, height = 8)
+                on.exit(dev.off(), add = TRUE)
+                if (!hm_pkgs_ok) {
+                    grid::grid.newpage()
+                    grid::grid.text("ComplexHeatmap unavailable.\nPlease rebuild the container.",
+                                    gp = grid::gpar(col = "firebrick", fontsize = 12))
+                } else {
+                    draw_heatmap_obj(build_heatmap_obj(contrast, current_hm_params(contrast)))
+                }
             }
         )
 

@@ -26,7 +26,9 @@ results/
 │       ├── <contrast_id>_DESeq2_results.csv
 │       ├── <contrast_id>_volcano.{pdf,png}
 │       ├── <contrast_id>_MA.{pdf,png}
-│       └── <contrast_id>_top_genes_heatmap.{pdf,png}
+│       ├── <contrast_id>_top50_genes_heatmap.{pdf,png}
+│       ├── <contrast_id>_top100_genes_heatmap.{pdf,png}
+│       └── <contrast_id>_top200_genes_heatmap.{pdf,png}
 ├── gsea/
 │   └── <contrast_id>/
 │       ├── <contrast_id>_GO_BP_gsea.csv
@@ -59,7 +61,8 @@ results/
 - `*_DESeq2_results.csv` — full results table with columns: `gene_id`, `gene_name`, `baseMean`, `log2FoldChange` (ashr-shrunken), `lfcSE`, `stat`, `pvalue`, `padj`.
 - `*_volcano.png` — volcano plot with top 20 significant genes labelled.
 - `*_MA.png` — MA plot.
-- `*_top_genes_heatmap.png` — heatmap of top 50 genes (by padj).
+- `*_top50_genes_heatmap.png` — ComplexHeatmap of the top 50 significant genes (padj < cutoff, |log2FC| >= cutoff; ranked by |log2FC|), with gene names.
+- `*_top100_genes_heatmap.png` / `*_top200_genes_heatmap.png` — same selection, denser, without gene names. All heatmaps are 8x8 in and unsupervised.
 
 ### GSEA
 - Each CSV contains one row per gene set with: `Description`, `NES`, `pval`, `padj`, `size`, `core_enrichment`/`leadingEdge`.

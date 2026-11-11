@@ -7,9 +7,11 @@ suppressPackageStartupMessages({
     library(DESeq2)
     library(ggplot2)
     library(ggrepel)
-    library(pheatmap)
+    library(ComplexHeatmap)
+    library(circlize)
     library(RColorBrewer)
     library(dplyr)
+    library(grid)
 })
 
 option_list <- list(
@@ -19,7 +21,9 @@ option_list <- list(
     make_option("--vst",        type = "character", help = "Path to VST matrix TSV (for heatmaps)"),
     make_option("--lfc_thresh", type = "double",    default = 1.0,  help = "LFC threshold for significance calls and volcano [default: 1.0]"),
     make_option("--alpha",      type = "double",    default = 0.05, help = "FDR threshold [default: 0.05]"),
-    make_option("--n_top",      type = "integer",   default = 50,   help = "Top N genes for heatmap [default: 50]")
+    make_option("--n_top",      type = "integer",   default = 50,   help = "Top N genes for the base heatmap [default: 50]"),
+    make_option("--n_top_extra", type = "character", default = "100,200",
+                help = "Comma-separated additional top-N heatmap sizes [default: 100,200]")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
@@ -168,54 +172,110 @@ p_ma <- ggplot(ma_df, aes(x = log10(baseMean + 1), y = log2FoldChange,
 
 save_plot(paste0(contrast_id, "_MA"), p_ma)
 
-# ---- top genes heatmap ------------------------------------------------------
-message("Plotting top genes heatmap...")
+# ---- top genes heatmaps (ComplexHeatmap) ------------------------------------
+message("Plotting top genes heatmaps...")
 
-# get samples for this contrast
+# Candidate genes: significant (padj < alpha) AND |log2FC| >= lfc threshold.
+# Each heatmap then takes its own top N ranked by |log2FC| (both up and down).
+sig_genes_df <- res_df[
+    !is.na(res_df$padj) & res_df$padj < opt$alpha &
+    !is.na(res_df$log2FoldChange) & abs(res_df$log2FoldChange) >= opt$lfc_thresh,
+    c("gene_id", "log2FoldChange"),
+    drop = FALSE
+]
+
+select_top_genes <- function(n) {
+    if (nrow(sig_genes_df) == 0) return(character(0))
+    ord <- order(abs(sig_genes_df$log2FoldChange), decreasing = TRUE)
+    head(sig_genes_df$gene_id[ord], n)
+}
+
+# Samples belonging to this contrast
 col_data <- as.data.frame(colData(dds))
 samples_in_contrast <- rownames(col_data[col_data[[contrast_var]] %in% c(contrast_ref, contrast_trt), ])
 vst_sub  <- vst_mat[, samples_in_contrast, drop = FALSE]
 
-top_genes <- head(res_df$gene_id[!is.na(res_df$padj)], opt$n_top)
-if (length(top_genes) < 2) {
-    message("  Too few significant genes for heatmap — skipping.")
-} else {
-    hm_mat   <- vst_sub[top_genes, , drop = FALSE]
-    hm_mat   <- hm_mat - rowMeans(hm_mat)  # center
-    rownames(hm_mat) <- gene_name_map[rownames(hm_mat)]
+# Column annotation (condition) - shared by all heatmaps; unsupervised throughout
+ann_col <- data.frame(
+    condition = factor(col_data[samples_in_contrast, contrast_var],
+                       levels = unique(c(contrast_ref, contrast_trt))),
+    row.names = samples_in_contrast
+)
+cond_lvls <- levels(ann_col$condition)
+n_pal     <- max(3, min(length(cond_lvls), 9))
+cond_cols <- setNames(colorRampPalette(brewer.pal(n_pal, "Set1"))(length(cond_lvls)), cond_lvls)
+ha_col <- ComplexHeatmap::HeatmapAnnotation(
+    condition          = ann_col$condition,
+    col                = list(condition = cond_cols),
+    annotation_name_gp = grid::gpar(fontsize = 8)
+)
 
-    ann_col  <- data.frame(condition = col_data[samples_in_contrast, contrast_var],
-                           row.names = samples_in_contrast)
-    cond_lvls  <- unique(ann_col$condition)
-    cond_cols  <- setNames(
-        colorRampPalette(brewer.pal(min(length(cond_lvls), 9), "Set1"))(length(cond_lvls)),
-        cond_lvls)
-    ann_colours <- list(condition = cond_cols)
-
-    for (ext in c("pdf", "png")) {
-        f <- paste0(contrast_id, "_top_genes_heatmap.", ext)
-        ht <- max(5, length(top_genes) * 0.18 + 2)
-        if (ext == "png") png(f, width = 800, height = ht * 100, res = 100)
-        else              pdf(f, width = 8, height = ht)
-        pheatmap(hm_mat,
-                 annotation_col    = ann_col,
-                 annotation_colors = ann_colours,
-                 cluster_rows      = TRUE,
-                 cluster_cols      = TRUE,
-                 show_rownames     = TRUE,
-                 show_colnames     = TRUE,
-                 fontsize_row      = 7,
-                 fontsize_col      = 8,
-                 color             = colorRampPalette(rev(brewer.pal(11, "RdBu")))(100),
-                 main              = paste0("Top ", length(top_genes), " genes: ",
-                                            contrast_trt, " vs ", contrast_ref))
-        dev.off()
+draw_top_heatmap <- function(n_top) {
+    top_genes <- select_top_genes(n_top)
+    if (length(top_genes) < 2) {
+        message(sprintf("  Top %d: too few significant genes - skipping.", n_top))
+        return(invisible(NULL))
     }
+    hm_mat <- vst_sub[top_genes, , drop = FALSE]
+    # Drop rows with non-finite values or zero variance (breaks clustering)
+    keep   <- apply(hm_mat, 1, function(x) all(is.finite(x)) && stats::sd(x) > 0)
+    hm_mat <- hm_mat[keep, , drop = FALSE]
+    if (nrow(hm_mat) < 2) {
+        message(sprintf("  Top %d: too few variable genes - skipping.", n_top))
+        return(invisible(NULL))
+    }
+    hm_mat <- hm_mat - rowMeans(hm_mat)  # center per row
+
+    # Row labels: gene symbol if available, else gene_id; ensure uniqueness
+    labs <- gene_name_map[rownames(hm_mat)]
+    miss <- is.na(labs) | !nzchar(labs)
+    labs[miss] <- rownames(hm_mat)[miss]
+    rownames(hm_mat) <- make.unique(labs)
+
+    lim <- max(stats::quantile(abs(hm_mat), 0.98, na.rm = TRUE), 1e-6)
+    col_fun <- circlize::colorRamp2(c(-lim, 0, lim), c("#4575b4", "white", "#d73027"))
+
+    # Gene names only for the small (base) heatmap; denser ones omit them.
+    show_names <- n_top <= 50
+
+    ht <- ComplexHeatmap::Heatmap(
+        hm_mat,
+        name                 = "Centered VST",
+        col                  = col_fun,
+        top_annotation       = ha_col,
+        show_row_names       = show_names,
+        show_column_names    = TRUE,
+        row_names_gp         = grid::gpar(fontsize = 6),
+        column_names_gp      = grid::gpar(fontsize = 8),
+        cluster_rows         = TRUE,
+        cluster_columns      = TRUE,
+        column_title         = paste0("Top ", nrow(hm_mat), " genes: ",
+                                      contrast_trt, " vs ", contrast_ref),
+        column_title_gp      = grid::gpar(fontsize = 12, fontface = "bold"),
+        heatmap_legend_param = list(title_gp  = grid::gpar(fontsize = 9),
+                                    labels_gp = grid::gpar(fontsize = 8))
+    )
+
+    # Fixed 8x8 in for every heatmap (consistent png/pdf height).
+    for (ext in c("pdf", "png")) {
+        f <- paste0(contrast_id, "_top", n_top, "_genes_heatmap.", ext)
+        if (ext == "png") png(f, width = 800, height = 800, res = 100)
+        else              pdf(f, width = 8, height = 8)
+        ComplexHeatmap::draw(ht)
+        dev.off()
+        message("  Saved: ", f)
+    }
+    invisible(NULL)
 }
+
+top_n_values <- unique(c(opt$n_top,
+                         as.integer(trimws(strsplit(opt$n_top_extra, ",")[[1]]))))
+top_n_values <- top_n_values[!is.na(top_n_values) & top_n_values > 1]
+for (n_top in sort(top_n_values)) draw_top_heatmap(n_top)
 
 # ---- versions ---------------------------------------------------------------
 ver <- sessionInfo()
-pkg_versions <- c("DESeq2", "ggplot2", "ggrepel", "pheatmap", "RColorBrewer", "dplyr", "ashr")
+pkg_versions <- c("DESeq2", "ggplot2", "ggrepel", "ComplexHeatmap", "circlize", "RColorBrewer", "dplyr", "ashr")
 ver_lines <- c("DESEQ2_DGE:",
                paste0("    R: ", ver$R.version$version.string))
 for (pkg in pkg_versions) {
