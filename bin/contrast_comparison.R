@@ -27,7 +27,7 @@ suppressPackageStartupMessages({
 option_list <- list(
     make_option("--padj", type = "double",  default = 0.05,
                 help = "Adjusted p-value threshold for DEG calls [default: %default]"),
-    make_option("--lfc",  type = "double",  default = 0.5,
+    make_option("--lfc",  type = "double",  default = 1.0,
                 help = "Absolute log2FC threshold for DEG calls [default: %default]"),
     make_option("--organism", type = "character", default = "auto",
                 help = "Organism: human, mouse, or auto (detect from gene IDs) [default: %default]"),

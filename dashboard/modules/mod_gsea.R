@@ -86,9 +86,13 @@ mod_gsea_server <- function(id, app_data) {
                                        class = "btn-outline-secondary btn-sm"))
                 ),
                 nav_panel("Results Table",
-                    DTOutput(ns("results_table")),
-                    downloadButton(ns("results_dl_csv"), "Download table (CSV)",
-                                   class = "btn-outline-secondary btn-sm mt-2")
+                    div(style = "display:flex; flex-direction:column; height:100%;",
+                        div(style = "flex:1 1 auto; overflow:auto; min-height:0;",
+                            DTOutput(ns("results_table"))),
+                        div(style = "flex:0 0 auto; padding-top:8px;",
+                            downloadButton(ns("results_dl_csv"), "Download table (CSV)",
+                                           class = "btn-outline-secondary btn-sm"))
+                    )
                 ),
                 nav_panel("Common GSEA",
                     fluidRow(

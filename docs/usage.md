@@ -75,10 +75,10 @@ Salmon float counts are rounded to integers automatically.
 | `--organism` | `human` | `human` or `mouse` |
 | `--run_gsea` | `true` | Enable/disable GSEA |
 | `--skip_dashboard` | `false` | Skip Shiny dashboard step |
-| `--alpha` | `0.05` | DESeq2 FDR threshold |
-| `--lfc_threshold` | `0.0` | LFC threshold for DESeq2 results() |
-| `--gsea_min_gs` | `15` | Minimum gene set size |
-| `--gsea_max_gs` | `500` | Maximum gene set size |
+| `--padj_threshold` | `0.05` | DESeq2 FDR threshold |
+| `--lfc_threshold` | `1.0` | Log2 fold change threshold for significance calls and volcano plot |
+| `--gsea_min_gs_size` | `15` | Minimum gene set size |
+| `--gsea_max_gs_size` | `500` | Maximum gene set size |
 | `--max_memory` | `128.GB` | Resource cap |
 | `--max_cpus` | `16` | Resource cap |
 | `--max_time` | `240.h` | Resource cap |

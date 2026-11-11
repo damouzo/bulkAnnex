@@ -127,6 +127,21 @@
                     "description": "Comma-separated additional top-N heatmap sizes (no gene names).",
                     "fa_icon": "fas fa-layer-group"
                 },
+                "comparison_padj": {
+                    "type": "number",
+                    "default": 0.05,
+                    "description": "Adjusted p-value threshold for cross-contrast DEG calls (Venn, UpSet, common-DEG heatmaps, ORA).",
+                    "fa_icon": "fas fa-percentage",
+                    "minimum": 0,
+                    "maximum": 1
+                },
+                "comparison_lfc": {
+                    "type": "number",
+                    "default": 1.0,
+                    "description": "Absolute log2 fold change threshold for cross-contrast DEG calls (Venn, UpSet, common-DEG heatmaps, ORA).",
+                    "fa_icon": "fas fa-sliders-h",
+                    "minimum": 0
+                },
                 "gsea_pval_cutoff": {
                     "type": "number",
                     "default": 0.05,

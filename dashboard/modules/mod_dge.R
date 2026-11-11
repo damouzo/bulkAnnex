@@ -27,17 +27,18 @@ mod_dge_ui <- function(id) {
                     ),
                     actionButton(ns("apply"), "Apply settings",
                                  icon = icon("play"),
-                                 class = "btn-primary w-100 mt-2"),
-                    downloadButton(ns("download_volcano"), "Download PNG",
-                                   class = "btn-outline-secondary w-100 mt-2"),
-                    downloadButton(ns("download_volcano_pdf"), "Download PDF",
-                                   class = "btn-outline-secondary w-100 mt-2")
+                                 class = "btn-primary w-100 mt-2")
                 )
             ),
             column(9,
                 navset_card_tab(
                     nav_panel("Volcano",
-                        imageOutput(ns("volcano_plot"), width = "100%", height = "700px")
+                        imageOutput(ns("volcano_plot"), width = "100%", height = "700px"),
+                        div(class = "mt-2",
+                            downloadButton(ns("download_volcano"), "Download PNG",
+                                           class = "btn-outline-secondary btn-sm"),
+                            downloadButton(ns("download_volcano_pdf"), "Download PDF",
+                                           class = "btn-outline-secondary btn-sm"))
                     ),
                     nav_panel("Heatmap",
                         fluidRow(
@@ -83,9 +84,13 @@ mod_dge_ui <- function(id) {
                         )
                     ),
                     nav_panel("Results Table",
-                        DTOutput(ns("results_table")),
-                        downloadButton(ns("results_dl_csv"), "Download table (CSV)",
-                                       class = "btn-outline-secondary btn-sm mt-2")
+                        div(style = "display:flex; flex-direction:column; height:100%;",
+                            div(style = "flex:1 1 auto; overflow:auto; min-height:0;",
+                                DTOutput(ns("results_table"))),
+                            div(style = "flex:0 0 auto; padding-top:8px;",
+                                downloadButton(ns("results_dl_csv"), "Download table (CSV)",
+                                               class = "btn-outline-secondary btn-sm"))
+                        )
                     ),
                     nav_panel("Common DEGs",
                         fluidRow(
@@ -106,7 +111,7 @@ mod_dge_ui <- function(id) {
                                     numericInput(ns("cmp_padj"), "adj. p-value \u2264",
                                         value = 0.05, min = 0, max = 1, step = 0.01),
                                     numericInput(ns("cmp_lfc"), "|log2FC| \u2265",
-                                        value = 0.5, min = 0, max = NA, step = 0.1),
+                                        value = 1, min = 0, max = NA, step = 0.1),
                                     uiOutput(ns("cmp_opts_ui")),
                                     hr(),
                                     actionButton(ns("cmp_apply"), "Apply Changes",
@@ -701,7 +706,7 @@ mod_dge_server <- function(id, app_data) {
             )
             dge_list  <- data()$dge
             padj_thr  <- input$cmp_padj %||% 0.05
-            lfc_thr   <- input$cmp_lfc  %||% 0.5
+            lfc_thr   <- input$cmp_lfc  %||% 1
 
             get_sets <- function(direction) {
                 lapply(setNames(selected, selected), function(cid) {
@@ -913,6 +918,32 @@ mod_dge_server <- function(id, app_data) {
             }
         )
 
+        output$cmp_download_up_pdf <- downloadHandler(
+            filename = function() {
+                paste0("common_degs_up_", input$cmp_type %||% "plot", ".pdf")
+            },
+            content = function(file) {
+                d <- cmp_sets()
+                req(d)
+                pdf(file, width = 9, height = 6)
+                on.exit(dev.off(), add = TRUE)
+                draw_common_plot(d$up, d$dge_full, "up", input$cmp_type %||% "upset")
+            }
+        )
+
+        output$cmp_download_down_pdf <- downloadHandler(
+            filename = function() {
+                paste0("common_degs_down_", input$cmp_type %||% "plot", ".pdf")
+            },
+            content = function(file) {
+                d <- cmp_sets()
+                req(d)
+                pdf(file, width = 9, height = 6)
+                on.exit(dev.off(), add = TRUE)
+                draw_common_plot(d$down, d$dge_full, "down", input$cmp_type %||% "upset")
+            }
+        )
+
         # =====================================================================
         # COMMON DEGs — Gene Heatmap & ORA (single plots over the common genes)
         # =====================================================================
@@ -1058,7 +1089,11 @@ mod_dge_server <- function(id, app_data) {
                 tagList(
                     downloadButton(ns("cmp_download_up"), "Download UP image",
                                    class = "btn-outline-secondary w-100 mt-2"),
+                    downloadButton(ns("cmp_download_up_pdf"), "Download UP PDF",
+                                   class = "btn-outline-secondary w-100 mt-2"),
                     downloadButton(ns("cmp_download_down"), "Download DOWN image",
+                                   class = "btn-outline-secondary w-100 mt-2"),
+                    downloadButton(ns("cmp_download_down_pdf"), "Download DOWN PDF",
                                    class = "btn-outline-secondary w-100 mt-2")
                 )
             }
