@@ -426,16 +426,20 @@ if ((length(common_up) + length(common_down)) > 0) {
 
     make_summary_df <- function(gene_ids, direction) {
         if (length(gene_ids) == 0) return(data.frame())
-        lfc_cols <- sapply(names(dge_list), function(cid) {
+        # Use cbind, NOT sapply: with a single gene, sapply collapses the
+        # per-contrast values into a 1-D vector, so colnames<- below fails with
+        # "attempt to set 'colnames' on an object with less than two dimensions".
+        # cbind always yields a genes x contrasts matrix.
+        lfc_cols <- do.call(cbind, lapply(names(dge_list), function(cid) {
             df  <- dge_list[[cid]]
             vec <- setNames(df$log2FoldChange, df$gene_id)
             round(vec[gene_ids], 4)
-        })
-        padj_cols <- sapply(names(dge_list), function(cid) {
+        }))
+        padj_cols <- do.call(cbind, lapply(names(dge_list), function(cid) {
             df  <- dge_list[[cid]]
             vec <- setNames(df$padj, df$gene_id)
             signif(vec[gene_ids], 3)
-        })
+        }))
         colnames(lfc_cols)  <- paste0("lfc_",  names(dge_list))
         colnames(padj_cols) <- paste0("padj_", names(dge_list))
         data.frame(
