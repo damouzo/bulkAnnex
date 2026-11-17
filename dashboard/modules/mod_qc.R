@@ -355,6 +355,15 @@ mod_qc_server <- function(id, app_data) {
             color_var <- input$pca_color_by %||% "sample"
             if (!color_var %in% colnames(ss)) color_var <- "condition"
 
+            # Visual-only: batch is blank for the primary samples. Map blank/NA to
+            # a labelled "none" level so ba_distinct_pal() keeps it and the scales
+            # below do not drop those points. Never affects the model.
+            if (color_var == "batch") {
+                b <- as.character(ss[["batch"]])
+                b[is.na(b) | !nzchar(trimws(b))] <- "none"
+                ss[["batch"]] <- b
+            }
+
             pca_df <- data.frame(
                 sample = rownames(pca$x),
                 PC1    = pca$x[, 1],

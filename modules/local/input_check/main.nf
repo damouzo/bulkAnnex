@@ -59,6 +59,12 @@ Notes
   groups, nor with qc/qc_vst_matrix.tsv.
 - qc/qc_vst_matrix.tsv is blind (unbiased) and covers all samples; it is the
   recommended matrix for visualisation.
+- DESeq2 design is chosen per norm_group: ~ batch + condition when the group has
+  >= 2 non-empty batch levels, otherwise ~ condition. A blank/NA batch (e.g.
+  primary samples) collapses to ~ condition. In NB4 and MSCline (9 samples,
+  fully-crossed batch) modelling batch reduces residual d.o.f. from 6 to 4.
+- The sequencing lane (seq_batch) is not modelled anywhere; where it is
+  confounded with condition it is not correctable and is only annotated.
 BULKANNEX_README
     """
 }

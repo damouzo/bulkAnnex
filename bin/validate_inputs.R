@@ -52,15 +52,8 @@ stop_if(any(is.na(ss$sample) | ss$sample == ""),
 stop_if(any(is.na(ss$condition) | ss$condition == ""),
     "Samplesheet contains empty or NA condition values.")
 
-if ("batch" %in% colnames(ss)) {
-    stop_if(any(is.na(ss$batch) | ss$batch == ""),
-        "Batch column contains empty or NA values. Remove the column if batch is not applicable.")
-    message("  Batch column detected: design will use ~ batch + condition")
-} else {
-    message("  No batch column: design will use ~ condition")
-}
-
-# norm_group: optional column; if absent, default to "all" (single global normalization)
+# norm_group: optional column; if absent, default to "all" (single global normalization).
+# Resolved BEFORE the batch check so batch can be validated per group.
 if ("norm_group" %in% colnames(ss)) {
     stop_if(any(is.na(ss$norm_group) | ss$norm_group == ""),
         "norm_group column contains empty or NA values.")
@@ -70,6 +63,26 @@ if ("norm_group" %in% colnames(ss)) {
 } else {
     ss$norm_group <- "all"
     message("  No norm_group column: all samples normalised together (norm_group = 'all')")
+}
+
+# batch: optional column. Per norm_group it must be either fully populated or
+# fully empty; a group with an empty batch is valid (~ condition). The design is
+# decided per group downstream: >= 2 non-empty batch levels -> ~ batch + condition,
+# otherwise ~ condition. Treat "" and NA the same.
+if ("batch" %in% colnames(ss)) {
+    ss$batch <- as.character(ss$batch)
+    ss$batch[is.na(ss$batch)] <- ""
+    for (grp in unique(ss$norm_group)) {
+        in_grp  <- ss$norm_group == grp
+        n_empty <- sum(!nzchar(ss$batch[in_grp]))
+        n_total <- sum(in_grp)
+        stop_if(n_empty > 0 && n_empty < n_total,
+            sprintf("Batch column is partially empty within norm_group '%s': %d of %d samples have no batch value. Fill every sample in that group or leave the whole group empty.",
+                    grp, n_empty, n_total))
+    }
+    message("  Batch column detected: per-group design (~ batch + condition when a group has >= 2 non-empty batch levels, else ~ condition)")
+} else {
+    message("  No batch column: design will use ~ condition")
 }
 
 # ---- validate contrasts -----------------------------------------------------

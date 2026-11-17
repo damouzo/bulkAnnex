@@ -46,13 +46,29 @@ rownames(ss) <- ss$sample
 # enforce factor levels: reference level for condition = first alphabetical
 ss$condition <- factor(ss$condition)
 
-has_batch <- "batch" %in% colnames(ss)
-if (has_batch) {
+# Design is decided per norm_group (the samplesheet is already subset to one
+# group above): use batch only when it has >= 2 non-empty levels. Blank/NA batch
+# (primary groups) collapses to ~ condition. Treat "" and NA the same.
+has_batch_col <- "batch" %in% colnames(ss)
+if (has_batch_col) {
+    batch_vals   <- as.character(ss$batch)
+    batch_vals[is.na(batch_vals)] <- ""
+    batch_levels <- unique(batch_vals[nzchar(batch_vals)])
+} else {
+    batch_levels <- character(0)
+}
+
+if (length(batch_levels) >= 2) {
     ss$batch <- factor(ss$batch)
-    message("Batch column detected. Design: ~ batch + condition")
+    message(sprintf("Batch column with %d non-empty levels (%s). Design: ~ batch + condition",
+                    length(batch_levels), paste(sort(batch_levels), collapse = ", ")))
     design_formula <- ~ batch + condition
 } else {
-    message("No batch column. Design: ~ condition")
+    if (has_batch_col) {
+        message("Batch column present with < 2 non-empty levels. Design: ~ condition")
+    } else {
+        message("No batch column. Design: ~ condition")
+    }
     design_formula <- ~ condition
 }
 

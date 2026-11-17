@@ -44,8 +44,12 @@ gene_names  <- counts_raw[rownames(counts_int), "gene_name"]
 
 # ---- build DESeqDataSet for QC (simple design) ------------------------------
 message("Building DESeqDataSet for VST...")
+# The QC model runs once over ALL samples. Batch is only meaningful within the
+# cell-line norm_groups and is blank for the primary groups, so a global
+# ~ batch + condition design can be rank-deficient and break estimateDispersions().
+# Keep the global design at ~ condition; `batch` is used only as an annotation.
 has_batch <- "batch" %in% colnames(ss)
-design_formula <- if (has_batch) ~ batch + condition else ~ condition
+design_formula <- ~ condition
 
 dds <- DESeqDataSetFromMatrix(
     countData = counts_int,
